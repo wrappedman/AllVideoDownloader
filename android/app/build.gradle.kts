@@ -11,8 +11,8 @@ android {
         applicationId = "com.allvideodownloader.avd"
         minSdk = 21
         targetSdk = 34
-        versionCode = 230
-        versionName = "2.3.0"
+        versionCode = 231
+        versionName = "2.3.1"
     }
 
     sourceSets["main"].apply {

@@ -15,7 +15,7 @@ import kotlin.concurrent.withLock
  */
 object AppConfig {
     const val APP_NAME = "All Video Downloader"
-    const val APP_VERSION = "2.3.0"
+    const val APP_VERSION = "2.3.1"
 
     /** Set once by the Android layer (`AvdApp`) before anything reads settings. */
     var configDir: File = File(System.getProperty("java.io.tmpdir") ?: ".", ".avd")

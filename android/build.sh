@@ -53,8 +53,8 @@ if [ -f "$APKSIGNER" ] && [ ! -f "$KEYSTORE" ]; then
     fail "apksigner.jar is present but the keystore $KEYSTORE is not"
 fi
 
-VERSION_CODE=230
-VERSION_NAME="2.3.0"
+VERSION_CODE=231
+VERSION_NAME="2.3.1"
 MIN_SDK=21
 TARGET_SDK=34
 PKG="com.allvideodownloader.avd"

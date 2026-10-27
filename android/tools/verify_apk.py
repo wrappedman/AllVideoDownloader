@@ -15,12 +15,27 @@ instead: it re-implements the v2 verification Android itself performs —
   * check the signature over the signed-data bytes with the certificate's own
     RSA key (pure-Python modular exponentiation, no third-party modules).
 
+It also performs the two install-time checks Android applies to a modern APK,
+because "the signature is fine" is not the same as "the phone will install it":
+
+  * `resources.arsc` must be **stored** (not deflated) and start on a 4-byte
+    boundary — Android 11+ rejects an app targeting API 30+ otherwise,
+  * every uncompressed entry must be 4-byte aligned (`.so` files page-aligned),
+
+and it checks the v1 (JAR) signature that Android 5–6 use: every entry digest in
+`MANIFEST.MF`, the manifest digest in `CERT.SF`, and — when the `openssl` binary
+is around — the PKCS#7 signature over that `CERT.SF`.
+
 Usage:  python3 tools/verify_apk.py <apk> [--quiet]
 Exit 0 = verified, 1 = not verified (reason printed).
 """
+import base64
 import hashlib
+import shutil
 import struct
+import subprocess
 import sys
+import tempfile
 import zipfile
 
 MAGIC = b"APK Sig Block 42"
@@ -208,10 +223,90 @@ def verify(path):
 
     with zipfile.ZipFile(path) as z:
         bad = z.testzip()
-    if bad is not None:
-        raise Bad(f"corrupt zip entry: {bad}")
+        if bad is not None:
+            raise Bad(f"corrupt zip entry: {bad}")
+        infos = z.infolist()
 
+    # install-time layout rules (the reason a signed APK can still be refused)
+    for info in infos:
+        raw_name_len, extra_len = struct.unpack_from("<HH", data, info.header_offset + 26)
+        data_off = info.header_offset + 30 + raw_name_len + extra_len
+        if info.filename == "resources.arsc":
+            if info.compress_type != zipfile.ZIP_STORED:
+                raise Bad("resources.arsc is compressed (Android 11+ refuses this for targetSdk 30+)")
+            if data_off % 4:
+                raise Bad(f"resources.arsc is not 4-byte aligned (offset {data_off})")
+        if info.compress_type == zipfile.ZIP_STORED:
+            align = 4096 if info.filename.endswith(".so") else 4
+            if data_off % align:
+                raise Bad(f"{info.filename} is not {align}-byte aligned (offset {data_off})")
+
+    check_v1(path)
     return True
+
+
+# ── v1 (JAR) ─────────────────────────────────────────────────────────────────
+def jar_sections(blob):
+    out = []
+    for chunk in blob.split(b"\r\n\r\n"):
+        if not chunk.strip():
+            continue
+        values = {}
+        for line in chunk.split(b"\r\n"):
+            if not line or line.startswith(b" "):
+                continue
+            key, _, value = line.partition(b": ")
+            values[key.decode()] = value.decode()
+        out.append(values)
+    return out
+
+
+def check_v1(path):
+    """Android 5–6 install through the JAR signature, so it has to be real."""
+    with zipfile.ZipFile(path) as z:
+        names = set(z.namelist())
+        if "META-INF/MANIFEST.MF" not in names:
+            return                                   # v2-only build
+        manifest = z.read("META-INF/MANIFEST.MF")
+        sf_name = next((n for n in names
+                        if n.upper().startswith("META-INF/") and n.upper().endswith(".SF")), "")
+        rsa_name = next((n for n in names
+                         if n.upper().startswith("META-INF/")
+                         and n.upper().endswith((".RSA", ".DSA", ".EC"))), "")
+        if not sf_name or not rsa_name:
+            raise Bad("MANIFEST.MF exists but its .SF/.RSA signature files do not")
+        sf = z.read(sf_name)
+        rsa = z.read(rsa_name)
+
+        for values in jar_sections(manifest):
+            name = values.get("Name")
+            digest = values.get("SHA-256-Digest")
+            if not name or not digest:
+                continue
+            if name not in names:
+                raise Bad(f"MANIFEST.MF lists a missing entry: {name}")
+            actual = base64.b64encode(hashlib.sha256(z.read(name)).digest()).decode()
+            if actual != digest:
+                raise Bad(f"MANIFEST.MF digest does not match the content of {name}")
+
+        manifest_digest = base64.b64encode(hashlib.sha256(manifest).digest()).decode()
+        if manifest_digest not in sf.decode(errors="replace"):
+            raise Bad(f"{sf_name} does not sign this MANIFEST.MF")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            openssl = shutil.which("openssl")
+            if not openssl:
+                return                               # digest checks above still apply
+            sf_path, rsa_path = f"{tmp}/sig.sf", f"{tmp}/sig.rsa"
+            open(sf_path, "wb").write(sf)
+            open(rsa_path, "wb").write(rsa)
+            done = subprocess.run(
+                [openssl, "smime", "-verify", "-inform", "DER", "-in", rsa_path,
+                 "-content", sf_path, "-noverify", "-out", "/dev/null"],
+                capture_output=True, text=True,
+            )
+            if done.returncode != 0:
+                raise Bad(f"the PKCS#7 signature does not verify: {done.stderr.strip()[:120]}")
 
 
 def main(argv):

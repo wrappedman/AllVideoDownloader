@@ -133,7 +133,16 @@ Tool locations can be overridden: `KOTLIN_HOME`, `ANDROID_JAR`, `DX_JAR`,
 ## Signing (when the Android build-tools are absent)
 
 `build.sh` uses Google's `apksigner.jar` when it can find one, and otherwise
-falls back to `tools/sign_apk.py`, which writes the same two schemes itself:
+falls back to `tools/sign_apk.py`, which does the three jobs that turn aapt2's
+output into something a phone will accept:
+
+* **zipalign** — uncompressed entries padded to a 4-byte boundary (`.so` files
+  to 4096) through the local header's extra field, exactly as `zipalign` does.
+  Android 11+ *refuses to install* an app targeting API 30+ whose
+  `resources.arsc` is not uncompressed and 4-byte aligned; that is why an APK
+  can verify as "signed" and still fail with "App not installed".`build.sh`
+  previously had no alignment step at all, and the check in
+  `tools/verify_apk.py` catches it.
 
 * **v1** — `META-INF/MANIFEST.MF`, `META-INF/AVD.SF` and `META-INF/AVD.RSA`
   (a PKCS#7 detached signature), so Android 6 and older can install the APK.
@@ -142,10 +151,11 @@ falls back to `tools/sign_apk.py`, which writes the same two schemes itself:
   chunking scheme. Android 11+ requires v2 for `targetSdk ≥ 30`, so a
   "v1-only" or unsigned APK would simply not install.
 
-`tools/verify_apk.py` then re-derives the content digest from the file and
-checks the signature against the certificate's own key — the same checks
-`apksigner verify` performs, implemented without the SDK. The build fails if
-that verification fails. The signing key lives in
+`tools/verify_apk.py` then re-derives the content digest from the file, checks
+the signature against the certificate's own key, re-checks every `MANIFEST.MF`
+digest and the PKCS#7 signature over `CERT.SF` (that is what Android 5–6 use),
+and asserts the alignment rules above — the same checks `apksigner verify`
+performs, implemented without the SDK. The build **fails** if any of them fail. The signing key lives in
 `tools/debug-signing-key.DEBUG-ONLY.pem`: a **debug-only** self-signed identity,
 committed on purpose so that every build of this app shares one certificate
 (Android refuses an update signed by a different key). It is not a release key
@@ -153,6 +163,17 @@ and must never be used for one.
 
 The fallback needs one Python module that is not in the standard library:
 `pip install cryptography`.
+
+### Installing over an older build
+
+Android only accepts an update signed with the certificate of the installed
+copy. The pre-2.3.0 APKs were signed with a throwaway key generated in a `/tmp`
+directory of a build machine, so that key is gone and **no new APK can ever be an
+"update" for those installs** — uninstall the app, then install this one. From
+`2.3.0` on the key is committed (`tools/debug-signing-key.DEBUG-ONLY.pem`), so
+later builds keep updating in place. If a phone reports "App not installed" for a
+*first* install, run `python3 tools/verify_apk.py <apk>`: it names the rejected
+detail (signature, digest or alignment).
 
 ## What YouTube support really is
 
