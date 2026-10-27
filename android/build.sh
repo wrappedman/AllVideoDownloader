@@ -53,9 +53,9 @@ if [ -f "$APKSIGNER" ] && [ ! -f "$KEYSTORE" ]; then
     fail "apksigner.jar is present but the keystore $KEYSTORE is not"
 fi
 
-VERSION_CODE=231
-VERSION_NAME="2.3.1"
-MIN_SDK=21
+VERSION_CODE=232
+VERSION_NAME="2.3.2"
+MIN_SDK=24
 TARGET_SDK=34
 PKG="com.allvideodownloader.avd"
 
@@ -204,7 +204,7 @@ if [ -f "$APKSIGNER" ]; then
         "$SIGNED"
     java -jar "$APKSIGNER" verify --min-sdk-version "$MIN_SDK" "$SIGNED"
 else
-    echo "==> apksigner fallback (v1 + v2, no Android build-tools)"
+    echo "==> apksigner fallback (APK Signature Scheme v2, no Android build-tools)"
     PYTHON="${PYTHON:-python3}"
     [ "$("$PYTHON" -c 'import cryptography' 2>&1)" = "" ] \
         || fail "signing needs apksigner.jar, or the Python 'cryptography' module"

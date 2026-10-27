@@ -133,33 +133,44 @@ Tool locations can be overridden: `KOTLIN_HOME`, `ANDROID_JAR`, `DX_JAR`,
 ## Signing (when the Android build-tools are absent)
 
 `build.sh` uses Google's `apksigner.jar` when it can find one, and otherwise
-falls back to `tools/sign_apk.py`, which does the three jobs that turn aapt2's
-output into something a phone will accept:
+falls back to `tools/sign_apk.py`, which writes **APK Signature Scheme v2**
+itself:
 
-* **zipalign** — uncompressed entries padded to a 4-byte boundary (`.so` files
-  to 4096) through the local header's extra field, exactly as `zipalign` does.
-  Android 11+ *refuses to install* an app targeting API 30+ whose
-  `resources.arsc` is not uncompressed and 4-byte aligned; that is why an APK
-  can verify as "signed" and still fail with "App not installed".`build.sh`
-  previously had no alignment step at all, and the check in
-  `tools/verify_apk.py` catches it.
+* **v2** — the APK Signing Block. The layout is the one AOSP's verifier walks:
+  a length-prefixed *sequence* of length-prefixed signers → signed data
+  (digests, certificates, attributes) → signatures → public key. The algorithm
+  id in both the digest and the signature record is `0x0103`
+  (RSASSA-PKCS1-v1_5 with SHA-256), which is what makes the content digest the
+  chunked SHA-256 over the three sections (file contents, central directory,
+  and the EOCD whose central-directory offset points at the signing block).
 
-* **v1** — `META-INF/MANIFEST.MF`, `META-INF/AVD.SF` and `META-INF/AVD.RSA`
-  (a PKCS#7 detached signature), so Android 6 and older can install the APK.
-* **v2** — the APK Signing Block with the AOSP algorithm ids (`0x0101` chunked
-  SHA-256 content digest, `0x0101` RSASSA-PKCS1-v1_5 signature) and the 1 MiB
-  chunking scheme. Android 11+ requires v2 for `targetSdk ≥ 30`, so a
-  "v1-only" or unsigned APK would simply not install.
+  Two things this got wrong at first, both fatal at install time: the outer
+  "sequence of signers" length prefix was missing (Android then mis-parsed the
+  signer and reported *"App not installed as package appears to be invalid"*),
+  and the digest record carried `0x0101` (RSA-PSS) instead of `0x0103`.
 
-`tools/verify_apk.py` then re-derives the content digest from the file, checks
-the signature against the certificate's own key, re-checks every `MANIFEST.MF`
-digest and the PKCS#7 signature over `CERT.SF` (that is what Android 5–6 use),
-and asserts the alignment rules above — the same checks `apksigner verify`
-performs, implemented without the SDK. The build **fails** if any of them fail. The signing key lives in
-`tools/debug-signing-key.DEBUG-ONLY.pem`: a **debug-only** self-signed identity,
-committed on purpose so that every build of this app shares one certificate
-(Android refuses an update signed by a different key). It is not a release key
-and must never be used for one.
+* **v1** — optional (`tools/sign_apk.py --v1`), the JAR signature with
+  `META-INF/AVD.SF` / `AVD.RSA`. Only Android 5–6 need it, and this build ships
+  `minSdk 24`, so the platform verifies v2 alone: one fewer scheme to get wrong.
+
+`tools/verify_apk.py` re-derives the content digest from the file and checks the
+signature against the certificate's key, then (when `--v1` was used) re-checks
+every `MANIFEST.MF` digest, the manifest digest in `CERT.SF` and the PKCS#7
+signature. The build **fails** if verification fails. The verifier is itself
+checked against a known-good APK produced by the real `apksigner` (it recomputes
+that file's digest and accepts its signature), and the signature of every build
+is additionally verified with `openssl dgst -verify`.
+
+The signing key lives in `tools/debug-signing-key.DEBUG-ONLY.pem`: a
+**debug-only** self-signed identity, committed on purpose so that every build of
+this app shares one certificate (Android refuses an update signed by a different
+key). It is not a release key and must never be used for one.
+
+`minSdk` is 24 (Android 7.0). It was 21, but API 21–23 verify *only* the JAR (v1)
+signature, and this repository has no `jarsigner` available to produce and
+validate one — shipping an unvalidated v1 is what makes an install fail with no
+useful message. If Android 5–6 support is ever needed, `tools/sign_apk.py --v1`
+plus a `minSdk` bump back to 21 is the path, with a real device to test on.
 
 The fallback needs one Python module that is not in the standard library:
 `pip install cryptography`.

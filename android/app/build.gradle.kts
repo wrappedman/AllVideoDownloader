@@ -9,10 +9,10 @@ android {
 
     defaultConfig {
         applicationId = "com.allvideodownloader.avd"
-        minSdk = 21
+        minSdk = 24
         targetSdk = 34
-        versionCode = 231
-        versionName = "2.3.1"
+        versionCode = 232
+        versionName = "2.3.2"
     }
 
     sourceSets["main"].apply {

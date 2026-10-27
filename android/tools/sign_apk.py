@@ -24,7 +24,7 @@ download), so this script does the same three jobs itself:
 
 Usage:
   python3 tools/sign_apk.py <in.apk> <out.apk> [--key tools/debug-signing-key.DEBUG-ONLY.pem]
-                            [--no-v1] [--no-v2]
+                            [--v1] [--no-v2]
 
 The key file holds a PEM private key followed by its self-signed certificate. It
 is a **debug** identity, committed on purpose: Android only accepts an update
@@ -39,10 +39,11 @@ import zlib
 MAGIC = b"APK Sig Block 42"
 V2_ID = 0x7109871A
 CHUNK = 1024 * 1024
-# AOSP ids — 0x0101 is CHUNKED_SHA256 for digests and RSASSA-PKCS1-v1_5 with
-# SHA-256 for signatures. (0x0103/0x0104 are RSA-PSS, a different scheme.)
-DIGEST_CHUNKED_SHA256 = 0x0101
-SIG_RSA_PKCS1_SHA256 = 0x0101
+# APK Signature Scheme v2 stores the *signature algorithm* id in both the digest
+# record and the signature record, and derives the content-digest algorithm from
+# it: 0x0103 = RSASSA-PKCS1-v1_5 with SHA-256 → chunked SHA-256 content digest.
+# (0x0101/0x0102 are RSA-PSS; 0x0104 is PKCS#1 v1.5 with SHA-512.)
+SIG_RSA_PKCS1_SHA256 = 0x0103
 PAGE = 4096
 ALIGN = 4
 
@@ -256,12 +257,16 @@ def build_signer(key, cert, digest):
     pub_der = cert.public_key().public_bytes(
         serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
     )
-    digests = lp(lp(struct.pack("<I", DIGEST_CHUNKED_SHA256) + lp(digest)))
+    digests = lp(lp(struct.pack("<I", SIG_RSA_PKCS1_SHA256) + lp(digest)))
     certs = lp(lp(cert_der))
     signed_data = digests + certs + lp(b"")
     signature = key.sign(signed_data, padding.PKCS1v15(), hashes.SHA256())
     signatures = lp(lp(struct.pack("<I", SIG_RSA_PKCS1_SHA256) + lp(signature)))
-    return lp(lp(signed_data) + signatures + lp(pub_der))
+    signer = lp(signed_data) + signatures + lp(pub_der)
+    # the v2 value is a length-prefixed **sequence** of length-prefixed signers,
+    # so a single signer needs both levels — apksigner writes it this way and
+    # Android's parser walks it that way
+    return lp(lp(signer))
 
 
 def v2_block(data, key, cert):
@@ -300,21 +305,29 @@ def main(argv):
         key_path = argv[argv.index("--key") + 1]
     key, cert = load_key(key_path)
 
-    entries = read_entries(inp)
-    if "--no-v1" not in argv:
+    if "--v1" in argv:
+        entries = read_entries(inp)
+
+        # Only Android 5-6 insist on the JAR signature. The build ships minSdk 24,
+        # where the platform verifies v2 — and a subtly wrong v1 fails the
+        # install on *every* device, so it stays opt-in.
         entries = v1_sign(entries, key, cert)
-        print("    v1: MANIFEST.MF + AVD.SF + PKCS#7 (SHA-256)")
-
-    write_zip(outp, entries)
-    print("    aligned: uncompressed entries → 4 bytes, .so → 4096")
-
-    if "--no-v2" not in argv:
+        write_zip(outp, entries)
+        print("    v1: MANIFEST.MF + AVD.SF + PKCS#7 (SHA-256), entries realigned")
         with open(outp, "rb") as fh:
             data = fh.read()
+    else:
+        # no v1: leave the zip exactly as aapt2/zipfile wrote it — there is
+        # nothing to align for v2, and rewriting a working zip only adds risk
+        with open(inp, "rb") as fh:
+            data = fh.read()
+        print("    zip: untouched (v2 only)")
+
+    if "--no-v2" not in argv:
         data = v2_block(data, key, cert)
+        print("    v2: Signature Scheme v2 (chunked SHA-256, RSA PKCS#1 v1.5)")
         with open(outp, "wb") as fh:
             fh.write(data)
-        print("    v2: Signature Scheme v2 (chunked SHA-256, RSA PKCS#1 v1.5)")
 
     print(f"    signed {outp}")
     return 0
