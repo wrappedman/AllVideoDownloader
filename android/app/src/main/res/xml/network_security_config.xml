@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The app's own API is served on http://127.0.0.1 (loopback), and many media CDNs
+  the engine supports are plain http. Cleartext stays permitted, exactly as the
+  desktop build can fetch http:// URLs.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

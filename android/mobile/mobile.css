@@ -1,0 +1,584 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   All Video Downloader · mobile.css — Android presentation layer
+   ──────────────────────────────────────────────────────────────────────────
+   Android-only skin. It is loaded *in addition to* the three desktop
+   stylesheets, and every rule is scoped to `html.android`, so the desktop UI is
+   not affected in any way. Nothing here changes behaviour: the same DOM, the
+   same ids/classes, the same JS, the same API. This file only re-arranges the
+   layout for a touch device:
+
+     · desktop window chrome  →  a top app bar
+     · 216 px icon rail       →  a Material-style bottom navigation bar
+     · hover-revealed actions →  always-visible 44 px touch targets
+     · two-column grids       →  single column, thumb-reachable ordering
+     · modals                 →  bottom sheets
+     · safe-area insets, dvh sizing, no hover-stick, no desktop scrollbars
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html.android {
+  /* ── device metrics ──────────────────────────────────────────────────── */
+  --nav-h: 60px;
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --tap: 46px;                     /* minimum comfortable touch target      */
+
+  --r-lg: 18px; --r-md: 14px; --r-sm: 11px;
+  --tb-h: calc(52px + var(--safe-t));
+
+  font-size: 15px;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html.android,
+html.android body {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+html.android body {
+  font-family: Roboto, "Noto Sans", "Android Sans", system-ui, -apple-system,
+               "Segoe UI", sans-serif;
+  /* `dvh` tracks the on-screen keyboard and the collapsing system bars; the
+     plain vh above it is the fallback for older WebViews. */
+  height: 100vh;
+  height: 100dvh;
+  user-select: none;
+}
+
+html.android #app {
+  height: 100vh;
+  height: 100dvh;
+  /* the WebView itself never scrolls; each view scrolls on its own */
+  overflow: hidden;
+}
+
+/* No desktop scrollbars, no rubber-band artefacts inside panels. */
+html.android ::-webkit-scrollbar { width: 0; height: 0; }
+
+/* ── ambient background: cheaper on a phone GPU ──────────────────────────── */
+html.android .orb { filter: blur(64px); opacity: .42; }
+html.android .orb-c { display: none; }
+html.android .grain { display: none; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   1. Top app bar (was: frameless desktop titlebar with min/max/close)
+   ══════════════════════════════════════════════════════════════════════════ */
+html.android .titlebar {
+  height: var(--tb-h);
+  min-height: var(--tb-h);
+  padding: var(--safe-t) calc(6px + var(--safe-r)) 0 calc(16px + var(--safe-l));
+  gap: 10px;
+  background: rgba(14, 14, 19, .92);
+  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  z-index: 40;
+}
+html.android .titlebar.drag-region { -webkit-user-select: none; }
+html.android .brand { gap: 10px; min-width: 0; }
+html.android .brand-logo { width: 24px; height: 24px; }
+html.android .brand-logo svg { width: 22px; height: 22px; }
+html.android .brand-name {
+  font-size: 15px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html.android .brand-ver { display: none; }         /* version lives in About  */
+html.android .titlebar-tools { padding-right: 0; }
+html.android .net-status {
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 99px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+}
+html.android .net-status .net-label { display: none; }   /* dot only, saves width */
+html.android .net-status { padding: 8px; gap: 0; }
+html.android .net-dot { width: 8px; height: 8px; }
+
+/* window buttons: minimise/maximise are meaningless on Android → gone.
+   The ✕ stays as a proper "quit" affordance (it runs the same exit flow). */
+html.android .win-controls { height: auto; align-items: center; gap: 2px; }
+html.android #btn-min,
+html.android #btn-max { display: none; }
+html.android .win-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  margin-left: 2px;
+}
+html.android .win-btn svg { width: 16px; height: 16px; }
+html.android .win-close { color: var(--text-2); }
+html.android .win-close:active { background: rgba(225, 29, 72, .85); color: #fff; }
+html.android .win-close:hover { background: var(--panel); color: var(--text); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   2. Navigation: desktop rail → bottom tab bar
+   ══════════════════════════════════════════════════════════════════════════ */
+html.android .shell { flex: 1; min-height: 0; }
+
+html.android .sidebar {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 60;
+  width: 100%;
+  min-width: 0;
+  height: calc(var(--nav-h) + var(--safe-b));
+  padding: 0 calc(6px + var(--safe-r)) var(--safe-b) calc(6px + var(--safe-l));
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 6px;
+  background: rgba(13, 13, 18, .96);
+  /* no backdrop-filter here: it would become the containing block for the
+     fixed-position side-foot cluster and drag it off-screen */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-right: 0;
+  border-top: 1px solid rgba(255, 255, 255, .07);
+  box-shadow: 0 -8px 30px -18px rgba(0, 0, 0, .9);
+}
+
+html.android .side-nav {
+  flex: 1;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 4px;
+}
+html.android .side-nav::before { display: none; }   /* no sliding pill: horizontal */
+
+html.android .nav-item {
+  flex: 1;
+  height: auto;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 7px 4px 6px;
+  border-radius: 14px;
+  color: var(--text-2);
+  position: relative;
+}
+html.android .nav-item svg { width: 22px; height: 22px; }
+html.android .nav-item:hover { transform: none; }
+html.android .nav-item:hover svg { transform: none; }
+html.android .nav-item:active { background: var(--panel); }
+html.android .nav-item.active {
+  color: #fff;
+  background: linear-gradient(180deg, var(--accent-soft), transparent 85%);
+}
+html.android .nav-item.active svg { color: var(--accent); filter: drop-shadow(0 0 8px var(--accent-glow)); }
+html.android .nav-item.active::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 26px;
+  height: 3px;
+  border-radius: 0 0 4px 4px;
+  background: var(--grad-accent);
+}
+html.android .nav-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .1px;
+  opacity: 1;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html.android .nav-count {
+  position: absolute;
+  top: 4px;
+  left: calc(50% + 7px);
+  right: auto;
+  margin: 0;
+  min-width: 18px;
+  height: 18px;
+  font-size: 10.5px;
+  box-shadow: none;
+}
+
+/* About / Exit / live speed float above the tab bar as one compact row so the
+   bottom bar stays a pure navigation surface. */
+html.android .side-foot {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  position: fixed;
+  right: calc(10px + var(--safe-r));
+  bottom: calc(var(--nav-h) + var(--safe-b) + 10px);
+  z-index: 55;
+  padding: 3px;
+  border-radius: 16px;
+  background: rgba(18, 18, 24, .82);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  box-shadow: var(--shadow-2);
+}
+html.android .collapse-btn {
+  height: 44px;
+  width: 44px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 12px;
+}
+html.android .collapse-btn span { display: none; }     /* icon-only */
+html.android .collapse-btn svg { width: 17px; height: 17px; }
+html.android .collapse-btn:hover { background: var(--panel); transform: none; }
+html.android .collapse-btn:active { background: var(--panel-strong); }
+html.android .speed-widget {
+  height: 44px;
+  padding: 0 10px;
+  gap: 6px;
+  border-radius: 12px;
+  background: transparent;
+  border: 0;
+}
+html.android .speed-widget .sw-text { font-size: 11.5px; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   3. Viewport / pages
+   ══════════════════════════════════════════════════════════════════════════ */
+html.android .viewport {
+  padding-bottom: calc(var(--nav-h) + var(--safe-b) + 56px);
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: auto;
+  overscroll-behavior-y: contain;
+}
+html.android .view {
+  padding: 16px calc(14px + var(--safe-r)) 8px calc(14px + var(--safe-l));
+  min-height: auto;
+}
+html.android .view.active { animation: avd-fade-in 260ms var(--ease) both; }
+@keyframes avd-fade-in { from { opacity: 0; transform: translateY(6px); } }
+
+html.android .page-head,
+html.android .page-head.head-inline {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+html.android .page-title { font-size: 21px; letter-spacing: -.3px; }
+html.android .page-sub { font-size: 12.5px; line-height: 1.5; max-width: none; margin-top: 4px; }
+html.android .head-actions {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+html.android .head-actions::-webkit-scrollbar { display: none; }
+html.android .head-actions > * { flex: none; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   4. Controls: 44 px targets, no hover-only affordances
+   ══════════════════════════════════════════════════════════════════════════ */
+html.android .btn {
+  height: var(--tap);
+  padding: 0 18px;
+  font-size: 14px;
+  border-radius: 14px;
+}
+html.android .btn-sm { height: 40px; padding: 0 14px; font-size: 13px; border-radius: 12px; }
+html.android .btn:hover { transform: none; }
+html.android .btn:active { transform: scale(.975); }
+html.android .btn-primary:hover { transform: none; box-shadow: 0 6px 22px -8px var(--accent-glow); }
+html.android .btn-primary::after { display: none; }       /* sheen is a hover toy */
+html.android .btn-ghost:hover { transform: none; }
+
+html.android .icon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: var(--text-2);
+}
+html.android .icon-btn svg { width: 17px; height: 17px; }
+html.android .icon-btn:hover { transform: none; background: transparent; }
+html.android .icon-btn:active { background: var(--panel-strong); transform: scale(.94); }
+
+html.android .chip {
+  height: 40px;
+  padding: 0 14px;
+  font-size: 13px;
+  border-radius: 13px;
+  flex: none;
+}
+html.android .chip-set {
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 8px;
+  padding: 2px 0 4px;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(90deg, #000 96%, transparent);
+  mask-image: linear-gradient(90deg, #000 96%, transparent);
+}
+html.android .chip-set::-webkit-scrollbar { display: none; }
+html.android .chip:hover { transform: none; }
+
+html.android .switch { width: 44px; height: 26px; }
+html.android .switch::after { width: 20px; height: 20px; top: 2px; left: 2px; }
+html.android .switch-line input:checked + .switch::after { left: 20px; }
+html.android .switch-line { min-height: 44px; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   5. Direct / grab view
+   ══════════════════════════════════════════════════════════════════════════ */
+html.android .hero {
+  padding: 6px 0 4px;
+  text-align: left;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+html.android .hero-title { font-size: 26px; line-height: 1.2; letter-spacing: -.6px; }
+html.android .hero-sub { font-size: 13px; margin: 8px 0 16px; line-height: 1.55; }
+
+html.android .dock { max-width: none; }
+html.android .paste-bar {
+  flex-wrap: wrap;
+  height: auto;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 20px;
+  background: rgba(22, 22, 29, .72);
+}
+html.android .paste-bar input {
+  order: -1;
+  flex: 1 1 100%;
+  width: 100%;
+  height: var(--tap);
+  padding: 0 12px;
+  font-size: 15px;                      /* ≥16px would stop iOS zoom; Android fine */
+  border-radius: 12px;
+  background: rgba(0, 0, 0, .32);
+  border: 1px solid var(--panel-border);
+}
+html.android .paste-bar input:focus { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+html.android .paste-bar .pb-icon { display: none; }      /* the field labels itself */
+html.android .paste-bar #pb-paste { flex: 0 0 auto; height: var(--tap); }
+html.android .paste-bar #btn-analyze { flex: 1 1 auto; height: var(--tap); }
+html.android .paste-bar:focus-within { transform: none; }
+
+html.android .quick-links {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 8px;
+  margin-top: 12px;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+html.android .quick-links::-webkit-scrollbar { display: none; }
+html.android .qlabel { flex: none; }
+html.android .qchip { flex: none; height: 38px; display: inline-flex; align-items: center; padding: 0 14px; }
+html.android .qchip:hover { transform: none; }
+
+html.android .analyze-stage { margin-top: 16px; }
+html.android .analyze-idle { padding: 30px 8px; }
+html.android .analyze-idle .ai-inner { max-width: 32ch; font-size: 13px; }
+html.android .radar { width: 108px; height: 108px; }
+html.android .radar .core svg { width: 24px; height: 24px; }
+
+html.android .analyze-card {
+  border-radius: 20px;
+  padding: 16px;
+}
+html.android .ac-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+html.android .ac-thumb { border-radius: 16px; }
+html.android .ac-title { font-size: 17px; line-height: 1.35; }
+html.android .ac-meta { font-size: 12px; gap: 10px; margin: 8px 0 12px; }
+html.android .ac-block-label { margin: 14px 0 8px; }
+html.android .ac-actions {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 16px;
+}
+html.android .ac-actions .btn { width: 100%; }
+html.android .ac-actions .btn-primary { order: -1; }
+
+html.android .rc-candidates { max-height: 42vh; }
+html.android .cand { min-height: 40px; }
+
+html.android .notice { font-size: 12.5px; padding: 11px 12px; }
+html.android .kv { font-size: 12.5px; padding: 9px 0; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   6. Downloads
+   ══════════════════════════════════════════════════════════════════════════ */
+html.android .dl-stats {
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+html.android .stat-card { padding: 12px 14px; border-radius: 16px; }
+html.android .stat-card:hover { transform: none; }
+html.android .stat-label { font-size: 10px; letter-spacing: .8px; }
+html.android .stat-value { font-size: 19px; margin-top: 3px; }
+html.android #speed-chart { width: 84px; height: 26px; right: 8px; opacity: .85; }
+
+html.android .dl-list { gap: 10px; }
+html.android .dl-row {
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 10px 12px;
+  padding: 13px 14px;
+  border-radius: 18px;
+}
+html.android .dl-row:hover { transform: none; box-shadow: none; border-color: var(--panel-border); }
+html.android .dl-type { width: 44px; height: 44px; border-radius: 14px; }
+html.android .dl-type svg { width: 20px; height: 20px; }
+html.android .dl-name { font-size: 13.5px; }
+html.android .dl-status { font-size: 10px; padding: 3px 7px; }
+html.android .dl-progress { height: 9px; }
+html.android .dl-line2 { gap: 12px; font-size: 11px; flex-wrap: wrap; }
+html.android .dl-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  gap: 2px;
+  opacity: 1;                        /* nothing hides behind hover on touch */
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, .05);
+}
+html.android .dl-actions .icon-btn { width: 46px; height: 42px; }
+html.android .results-empty { padding: 40px 12px; }
+html.android .results-empty .re-ico { width: 68px; height: 68px; border-radius: 22px; margin-bottom: 14px; }
+html.android .results-empty .re-ico svg { width: 30px; height: 30px; }
+
+html.android .save-chip { height: 30px; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   7. Settings
+   ══════════════════════════════════════════════════════════════════════════ */
+html.android .settings-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  max-width: none;
+}
+html.android .set-card { padding: 16px; border-radius: 20px; }
+html.android .set-card .sc-body { gap: 16px; margin-top: 14px; padding-top: 14px; }
+html.android .set-pair { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+html.android .input,
+html.android select.input,
+html.android textarea.input {
+  height: var(--tap);
+  font-size: 14px;
+  border-radius: 12px;
+  padding: 0 14px;
+}
+html.android select.input { padding-right: 34px; }
+html.android .input-row { gap: 8px; }
+html.android .input-row > .btn { height: var(--tap); width: var(--tap); padding: 0; }
+html.android .input-row > .btn svg { width: 18px; height: 18px; }
+html.android .set-row { gap: 12px; min-height: 44px; }
+html.android .set-row .sr-txt b { font-size: 13.5px; }
+html.android .set-row .sr-txt span { font-size: 12px; }
+html.android .range-line { gap: 10px; }
+html.android .range-line input[type="range"] { height: 8px; }
+html.android .range-line input[type="range"]::-webkit-slider-thumb { width: 24px; height: 24px; border-width: 4px; }
+html.android .range-val { min-width: 54px; font-size: 13px; }
+html.android .swatches { gap: 12px; }
+html.android .swatch { width: 44px; height: 44px; border-radius: 14px; }
+html.android .swatch:hover { transform: none; }
+html.android .f-more > summary { min-height: 36px; align-items: center; font-size: 12px; }
+html.android .cap { font-size: 11.5px; padding: 4px 10px; }
+html.android .kv-list .kv { padding: 10px 0; }
+html.android .settings-grid code { overflow-wrap: anywhere; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   8. Overlays: toasts (bottom, above the tab bar) and modals (bottom sheet)
+   ══════════════════════════════════════════════════════════════════════════ */
+html.android .toast-stack {
+  left: calc(10px + var(--safe-l));
+  right: calc(10px + var(--safe-r));
+  bottom: calc(var(--nav-h) + var(--safe-b) + 70px);
+  gap: 8px;
+}
+html.android .toast {
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 16px;
+  font-size: 13px;
+}
+
+html.android .modal-root {
+  align-items: end;
+  justify-items: stretch;
+  padding: 0;
+  background: rgba(5, 5, 8, .68);
+}
+html.android .modal {
+  width: 100%;
+  max-width: none;
+  max-height: 88dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 24px 24px 0 0;
+  border-bottom: 0;
+  padding: 8px 18px calc(18px + var(--safe-b));
+  animation: sheet-in 300ms var(--ease) both;
+}
+/* same treatment for the wider About sheet (kept separate so a browser without
+   :has() still gets the plain-sheet rule above) */
+html.android .modal:has(.about-hero) { width: 100%; max-width: none; }
+@keyframes sheet-in { from { transform: translateY(40px); opacity: .6; } }
+html.android .modal::before {
+  content: "";
+  display: block;
+  width: 38px;
+  height: 4px;
+  margin: 2px auto 14px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, .22);
+}
+html.android .modal h3 { font-size: 17px; }
+html.android .modal p { font-size: 13px; }
+html.android .modal-actions { flex-direction: column-reverse; margin-top: 18px; }
+html.android .modal-actions .btn { width: 100%; }
+html.android .about-feats { grid-template-columns: 1fr; }
+html.android .about-author { flex-wrap: wrap; }
+
+html.android .exit-card { padding: 30px 26px; }
+html.android .exit-card p { max-width: 30ch; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   9. Bigger screens (tablets, landscape) get some room back
+   ══════════════════════════════════════════════════════════════════════════ */
+@media (min-width: 720px) {
+  html.android { --nav-h: 64px; }
+  html.android .view { padding-left: calc(24px + var(--safe-l)); padding-right: calc(24px + var(--safe-r)); }
+  html.android .settings-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  html.android .set-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  html.android .dl-stats { grid-template-columns: repeat(4, 1fr); }
+  html.android .hero-title { font-size: 34px; }
+  html.android .ac-grid { grid-template-columns: 220px minmax(0, 1fr); }
+  html.android .ac-actions { flex-direction: row; flex-wrap: wrap; }
+  html.android .ac-actions .btn { width: auto; }
+  html.android .nav-item { flex-direction: row; gap: 10px; padding: 8px 12px; }
+  html.android .nav-item svg { width: 20px; height: 20px; }
+  html.android .nav-label { font-size: 12.5px; }
+  html.android .nav-count { position: static; margin-left: auto; }
+  html.android .nav-item.active::before { display: none; }
+  html.android .paste-bar { flex-wrap: nowrap; }
+  html.android .paste-bar input { order: 0; flex: 1 1 auto; width: auto; background: none; border: 0; padding: 0 4px; }
+  html.android .paste-bar .pb-icon { display: grid; }
+  html.android .modal { border-radius: 24px; margin: 0 18px 18px; }
+  html.android .modal-root { align-items: center; }
+}
+
+/* No dark-mode inversion, ever: the palette is already dark by design. */
+@media (prefers-color-scheme: light) {
+  html.android body { background: var(--bg); }
+}
