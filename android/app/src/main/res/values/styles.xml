@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Same dark canvas the web UI paints itself on, so there is no white flash
+         before the frontend renders. No AppCompat: this build has no AndroidX. -->
+    <style name="AvdTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/avd_background</item>
+        <item name="android:statusBarColor">@color/avd_background</item>
+        <item name="android:navigationBarColor">@color/avd_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

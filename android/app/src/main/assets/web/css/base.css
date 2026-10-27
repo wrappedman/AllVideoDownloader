@@ -1,0 +1,236 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   WebFinder · base.css — design tokens, window chrome, layout, ambient FX
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── surfaces ─────────────────────────────────────────────────────────── */
+  --bg:            #121212;               /* deep charcoal, as specced      */
+  --bg-2:          #0c0c10;
+  --panel:         rgba(255, 255, 255, 0.045);
+  --panel-strong:  rgba(255, 255, 255, 0.07);
+  --panel-border:  rgba(255, 255, 255, 0.09);
+  --panel-border-hi: rgba(255, 255, 255, 0.18);
+  --glass-blur:    22px;
+
+  /* ── text ─────────────────────────────────────────────────────────────── */
+  --text:    #f2f2f7;
+  --text-2:  rgba(235, 235, 245, 0.66);
+  --text-3:  rgba(235, 235, 245, 0.38);
+
+  /* ── accents (swapped live from Settings) ─────────────────────────────── */
+  --accent:      #a855f7;
+  --accent-2:    #4f7cff;
+  --accent-soft: rgba(168, 85, 247, 0.16);
+  --accent-glow: rgba(168, 85, 247, 0.45);
+  --accent-2-glow: rgba(79, 124, 255, 0.4);
+  --grad-accent: linear-gradient(115deg, var(--accent), var(--accent-2));
+
+  /* ── semantics ────────────────────────────────────────────────────────── */
+  --ok:      #34d399;
+  --warn:    #fbbf24;
+  --danger:  #fb7185;
+  --info:    #38bdf8;
+
+  /* ── metrics ────────────────────────────────────────────────────────── */
+  --r-lg: 18px; --r-md: 13px; --r-sm: 9px;
+  --tb-h: 42px;
+  --rail-w: 216px;
+  --rail-w-min: 64px;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);          /* easeOutQuint        */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1); /* overshoot           */
+  --t-fast: 160ms; --t-med: 260ms; --t-slow: 420ms;
+
+  --shadow-1: 0 1px 2px rgba(0,0,0,.4);
+  --shadow-2: 0 10px 30px -12px rgba(0,0,0,.65);
+  --shadow-pop: 0 18px 50px -20px rgba(0,0,0,.8);
+
+  font-size: 15px;
+}
+
+/* accent presets (class on <html>) */
+html[data-accent="azure"]   { --accent:#38bdf8; --accent-2:#4f7cff; --accent-soft:rgba(56,189,248,.14);  --accent-glow:rgba(56,189,248,.45);  --accent-2-glow:rgba(79,124,255,.4); }
+html[data-accent="magenta"] { --accent:#f472b6; --accent-2:#a855f7; --accent-soft:rgba(244,114,182,.13); --accent-glow:rgba(244,114,182,.42); --accent-2-glow:rgba(168,85,247,.4); }
+html[data-accent="mint"]    { --accent:#34d399; --accent-2:#38bdf8; --accent-soft:rgba(52,211,153,.12); --accent-glow:rgba(52,211,153,.38);  --accent-2-glow:rgba(56,189,248,.35); }
+
+/* ── reset ───────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* Inline icons are sized here, once. An <svg> with a viewBox but no width/height
+   resolves to the width of its container (300×150 at worst), which made the
+   download row's clock/ETA icon jump size whenever the text next to it changed.
+   Every component rule below still wins by specificity. */
+svg { width: 16px; height: 16px; flex: none; vertical-align: -2px; }
+html, body { height: 100%; }
+body {
+  font-family: "Segoe UI Variable Text", "Segoe UI", Inter, system-ui, -apple-system,
+               "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+  display: flex; flex-direction: column;
+}
+input, textarea { user-select: text; font: inherit; color: inherit; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+a { color: var(--accent); text-decoration: none; }
+code { font-family: "Cascadia Code", "JetBrains Mono", ui-monospace, Consolas, monospace;
+       font-size: .86em; background: var(--panel-strong); padding: 1px 6px; border-radius: 5px; }
+::selection { background: var(--accent); color: #fff; }
+.hidden { display: none !important; }
+
+/* scrollbars */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.11); border-radius: 8px; border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.22); border-radius: 8px; border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* First paint: suppress all transitions so the UI doesn't "flash-animate" */
+body.preload * { transition: none !important; animation-duration: 0s !important; }
+
+/* ── ambient background ──────────────────────────────────────────────────── */
+#ambient { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
+  background:
+    radial-gradient(1100px 700px at 82% -12%, rgba(79,124,255,.13), transparent 60%),
+    radial-gradient(900px 640px at -8% 108%, color-mix(in srgb, var(--accent) 11%, transparent), transparent 62%),
+    linear-gradient(180deg, #121216 0%, var(--bg) 45%, var(--bg-2) 100%); }
+.orb { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .5;
+  transition: opacity var(--t-slow) var(--ease); will-change: transform; }
+.orb-a { width: 46vw; height: 46vw; left: -12vw; top: -18vw;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 55%, #000) 0%, transparent 70%);
+  animation: drift-a 34s ease-in-out infinite alternate; }
+.orb-b { width: 40vw; height: 40vw; right: -10vw; top: 18vh;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent-2) 52%, #000) 0%, transparent 70%);
+  animation: drift-b 41s ease-in-out infinite alternate; }
+.orb-c { width: 30vw; height: 30vw; left: 34vw; bottom: -16vw;
+  background: radial-gradient(circle, rgba(56,189,248,.42) 0%, transparent 70%);
+  animation: drift-c 29s ease-in-out infinite alternate; }
+.grain { position: absolute; inset: -50%; opacity: .05; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
+  animation: grain-shift 9s steps(6) infinite; }
+@keyframes drift-a { to { transform: translate(9vw, 7vh) scale(1.15); } }
+@keyframes drift-b { to { transform: translate(-7vw, -6vh) scale(1.1); } }
+@keyframes drift-c { to { transform: translate(5vw, -8vh) scale(.92); } }
+@keyframes grain-shift { to { transform: rotate(.6deg) translate(1.5%, -1.5%); } }
+html.no-ambient .orb, html.no-ambient .grain { opacity: 0; }
+
+/* ── window frame (borderless pywebview / simulated in browser) ─────────── */
+#app { position: relative; z-index: 1; display: flex; flex-direction: column;
+  height: 100vh; overflow: hidden; }
+.titlebar {
+  height: var(--tb-h); min-height: var(--tb-h);
+  display: flex; align-items: center; gap: 12px; padding: 0 0 0 14px;
+  background: rgba(14, 14, 19, .74);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.5);
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  -webkit-app-region: drag;            /* pywebview frameless dragging */
+  app-region: drag;
+}
+.drag-region { -webkit-user-select: none; }
+.no-drag { -webkit-app-region: no-drag; app-region: no-drag; }
+.brand { display: flex; align-items: center; gap: 9px; }
+.brand-logo { display: grid; place-items: center; width: 22px; height: 22px; }
+.brand-logo svg { filter: drop-shadow(0 0 6px var(--accent-glow)); }
+.brand-name { font-size: 14.5px; font-weight: 600; letter-spacing: .3px; }
+.brand-name i { font-style: normal; background: var(--grad-accent);
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
+.brand-ver { font-size: 10.5px; color: var(--text-3); border: 1px solid var(--panel-border);
+  padding: 1.5px 7px; border-radius: 99px; }
+.badge { font-size: 10px; font-weight: 700; letter-spacing: .8px; padding: 2px 8px;
+  border-radius: 99px; }
+.badge-demo { color: #ffd88a; background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.35);
+  animation: pulse-border 2.6s ease-in-out infinite; }
+@keyframes pulse-border { 50% { border-color: rgba(251,191,36,.7); } }
+
+.titlebar-tools { flex: 1; display: flex; justify-content: flex-end; align-items: center; padding-right: 8px; }
+.net-status { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-3); }
+.net-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); transition: background var(--t-med); }
+.net-status.online .net-dot { background: var(--ok); box-shadow: 0 0 8px rgba(52,211,153,.8); }
+.net-status.offline .net-dot { background: var(--danger); }
+
+.win-controls { display: flex; height: 100%; }
+.win-btn { width: 46px; height: 100%; display: grid; place-items: center; color: var(--text-2);
+  transition: background var(--t-fast), color var(--t-fast); position: relative; }
+.win-btn svg { width: 13px; height: 13px; }
+.win-btn:hover { background: rgba(255,255,255,.09); color: var(--text); }
+.win-close:hover { background: #e11d48; color: #fff; }
+.win-close:hover::after { box-shadow: 0 0 18px rgba(225,29,72,.9); }
+
+/* ── shell + sidebar ─────────────────────────────────────────────────────── */
+.shell { flex: 1; display: flex; min-height: 0; }
+.sidebar {
+  width: var(--rail-w); min-width: var(--rail-w);
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding: 10px 10px 12px;
+  background: rgba(255,255,255,.028);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-right: 1px solid rgba(255,255,255,.05);
+  transition: width var(--t-med) var(--ease), min-width var(--t-med) var(--ease);
+}
+body.rail-min .sidebar { width: var(--rail-w-min); min-width: var(--rail-w-min); }
+.side-nav { display: flex; flex-direction: column; gap: 4px; position: relative; }
+.side-nav::before {           /* active pill backdrop that slides between items */
+  content: ""; position: absolute; left: 0; width: 100%; height: 44px; border-radius: 12px;
+  background: linear-gradient(100deg, var(--accent-soft), transparent 78%);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  box-shadow: inset 0 0 24px color-mix(in srgb, var(--accent) 10%, transparent),
+              0 4px 22px -8px var(--accent-glow);
+  transform: translateY(var(--nav-y, 0px));
+  transition: transform 380ms var(--ease-spring);
+  pointer-events: none;
+}
+.nav-item { position: relative; display: flex; align-items: center; gap: 12px; height: 44px;
+  padding: 0 12px; border-radius: 12px; color: var(--text-2); z-index: 1;
+  transition: color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease); }
+.nav-item svg { width: 19px; height: 19px; flex: none; transition: filter var(--t-med), transform var(--t-med) var(--ease-spring); }
+.nav-item:hover { color: var(--text); transform: translateX(2px); }
+.nav-item:hover svg { transform: scale(1.12); }
+.nav-item.active { color: #fff; }
+.nav-item.active svg { filter: drop-shadow(0 0 7px var(--accent-glow)); color: var(--accent); }
+.nav-label { font-size: 13.5px; font-weight: 600; letter-spacing: .2px; white-space: nowrap;
+  transition: opacity var(--t-fast), transform var(--t-med) var(--ease); }
+.nav-count { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px;
+  font-size: 11px; font-weight: 700; display: grid; place-items: center;
+  background: var(--grad-accent); color: #fff; box-shadow: 0 0 14px -2px var(--accent-glow);
+  animation: pop-in var(--t-med) var(--ease-spring); }
+@keyframes pop-in { from { transform: scale(0); } to { transform: scale(1); } }
+body.rail-min .nav-label, body.rail-min .nav-count { opacity: 0; transform: translateX(-8px); width: 0; min-width: 0; padding: 0; overflow: hidden; }
+.side-foot { display: flex; flex-direction: column; gap: 10px; }
+.collapse-btn { height: 38px; border-radius: 12px; display: flex; align-items: center; justify-content: flex-start; gap: 12px;
+  padding: 0 12px;
+  color: var(--text-3); border: 1px solid transparent; transition: all var(--t-fast) var(--ease); }
+.collapse-btn svg { width: 16px; height: 16px; transition: transform var(--t-med) var(--ease); }
+.collapse-btn:hover { color: var(--text); background: var(--panel); border-color: var(--panel-border); }
+.speed-widget { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 10px;
+  background: var(--panel); border: 1px solid var(--panel-border); transition: opacity var(--t-med); }
+.speed-widget .sw-icon { color: var(--ok); display: grid; place-items: center; }
+.speed-widget .sw-icon svg { width: 15px; height: 15px; animation: bob 1.6s ease-in-out infinite; }
+@keyframes bob { 50% { transform: translateY(2px); } }
+.sw-text { font-size: 12px; color: var(--text-2); white-space: nowrap; }
+.sw-text b { color: var(--text); font-variant-numeric: tabular-nums; }
+.sw-text i { font-style: normal; font-size: 10px; color: var(--text-3); margin-left: 2px; }
+body.rail-min .speed-widget { opacity: 0; pointer-events: none; }
+
+/* ── viewport & view transitions ─────────────────────────────────────────── */
+.viewport { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; position: relative;
+  scroll-behavior: smooth; }
+.view { display: none; min-height: 100%; padding: 26px 34px 60px; }
+.view.active { display: block; animation: view-in 420ms var(--ease) both; }
+@keyframes view-in { from { opacity: 0; transform: translateY(14px) scale(.992); filter: blur(4px); }
+                     to  { opacity: 1; transform: none; filter: blur(0); } }
+.page-head { margin-bottom: 24px; }
+.page-head.head-inline { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap; }
+.head-actions { display: flex; gap: 8px; }
+.page-title { font-size: 27px; font-weight: 650; letter-spacing: -.4px; }
+.page-sub { color: var(--text-2); font-size: 13.5px; margin-top: 6px; max-width: 62ch; line-height: 1.55; }
+.grad-text { background: var(--grad-accent); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+@media (max-width: 900px) {
+  .view { padding: 20px 18px 50px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

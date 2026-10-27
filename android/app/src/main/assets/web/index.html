@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob: https: http: ws: wss:;" />
+<title>All Video Downloader</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23a855f7'/%3E%3Cstop offset='1' stop-color='%234f7cff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Cpath d='M16 7v12m0 0l-4.5-4.5M16 19l4.5-4.5M8 23h16' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/static/css/base.css" />
+<link rel="stylesheet" href="/static/css/components.css" />
+<link rel="stylesheet" href="/static/css/views.css" />
+</head>
+<body class="preload">
+<div id="ambient" aria-hidden="true">
+  <div class="orb orb-a"></div>
+  <div class="orb orb-b"></div>
+  <div class="orb orb-c"></div>
+  <div class="grain"></div>
+</div>
+
+<div id="app">
+  <!-- ────────────────────────── custom window frame ────────────────────────── -->
+  <header class="titlebar drag-region pywebview-drag-region">
+    <div class="brand">
+      <span class="brand-logo" id="brand-logo"></span>
+      <span class="brand-name">All<i>Video</i> Downloader</span>
+      <span class="brand-ver" id="app-version">v2.2</span>
+    </div>
+    <div class="titlebar-tools">
+      <span class="net-status" id="net-status" title="Backend connection">
+        <span class="net-dot"></span><span class="net-label">connecting…</span>
+      </span>
+    </div>
+    <div class="win-controls no-drag">
+      <button class="win-btn" id="btn-min" title="Minimize" aria-label="Minimize window"></button>
+      <button class="win-btn" id="btn-max" title="Maximize" aria-label="Maximize window"></button>
+      <button class="win-btn win-close" id="btn-close" title="Close" aria-label="Close window"></button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <!-- ────────────────────────────── sidebar ────────────────────────────── -->
+    <aside class="sidebar" id="sidebar">
+      <nav class="side-nav" id="side-nav" aria-label="Primary">
+        <!-- nav buttons injected by app.js -->
+      </nav>
+      <div class="side-foot">
+        <div class="speed-widget hidden" id="global-speed" title="Aggregate download speed">
+          <span class="sw-icon"></span>
+          <span class="sw-text"><b id="sw-value">0</b><i id="sw-unit">B/s</i></span>
+        </div>
+        <button class="collapse-btn about-btn" id="btn-about" title="About All Video Downloader"></button>
+        <button class="collapse-btn exit-btn" id="btn-exit" title="Exit All Video Downloader"></button>
+      </div>
+    </aside>
+
+    <!-- ────────────────────────────── viewport ────────────────────────────── -->
+    <main class="viewport" id="viewport">
+
+      <!-- =============== SMART DIRECT LINK =============== -->
+      <section class="view active" id="view-direct" data-title="Grab a video">
+        <div class="hero" id="grab-hero">
+          <h1 class="hero-title">Download <span class="grad-text">any video</span>. Any source.</h1>
+          <p class="hero-sub">Paste a link — YouTube, a raw <code>.mp4</code>, an <code>.m3u8</code> / <code>.mpd</code> stream, or any page hosting one. Every quality found becomes a button.</p>
+        </div>
+        <div class="dock">
+          <div class="paste-bar">
+            <span class="pb-icon" id="pb-icon"></span>
+            <input type="text" id="direct-url" spellcheck="false" placeholder="https://www.youtube.com/watch?v=…  ·  https://host/video.m3u8  ·  magnet:?xt=urn:btih:…" aria-label="Video URL" />
+            <button class="btn btn-ghost btn-sm" id="pb-paste" title="Paste from clipboard">Paste</button>
+            <button class="btn btn-primary" id="btn-analyze"><span class="btn-ico"></span><span>Grab it</span></button>
+          </div>
+          <div class="quick-links" id="quick-links"></div>
+        </div>
+        <div class="analyze-stage" id="analyze-stage">
+          <div class="analyze-idle" id="analyze-idle"></div>
+        </div>
+      </section>
+
+      <!-- =============== DOWNLOAD MANAGER =============== -->
+      <section class="view" id="view-downloads" data-title="Downloads">
+        <div class="page-head head-inline">
+          <div>
+            <h1 class="page-title">Download <span class="grad-text">Manager</span></h1>
+            <p class="page-sub" id="dl-subtitle">Nothing in flight — paste a link and hit Grab it.</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-ghost btn-sm" id="dl-pause-all">Pause all</button>
+            <button class="btn btn-ghost btn-sm" id="dl-resume-all">Resume all</button>
+            <button class="btn btn-danger-ghost btn-sm" id="dl-clear">Clear finished</button>
+          </div>
+        </div>
+
+        <div class="dl-stats" id="dl-stats">
+          <div class="stat-card"><span class="stat-label">Active</span><span class="stat-value" id="st-active">0</span></div>
+          <div class="stat-card"><span class="stat-label">Speed</span><span class="stat-value" id="st-speed">0 <i>B/s</i></span><canvas id="speed-chart" width="180" height="34"></canvas></div>
+          <div class="stat-card"><span class="stat-label">Completed</span><span class="stat-value" id="st-done">0</span></div>
+          <div class="stat-card"><span class="stat-label">Saved</span><span class="stat-value" id="st-saved">0 <i>B</i></span></div>
+        </div>
+
+        <div class="dl-list" id="dl-list"></div>
+        <div class="results-empty" id="dl-empty"></div>
+      </section>
+
+      <!-- =============== SETTINGS =============== -->
+      <section class="view" id="view-settings" data-title="Settings">
+        <div class="page-head head-inline">
+          <div>
+            <h1 class="page-title">Settings</h1>
+            <p class="page-sub">Every change saves itself to <code id="cfg-path">~/.avd/settings.json</code>.</p>
+          </div>
+          <div class="head-actions">
+            <span class="save-chip" id="set-saved"><span class="dot"></span>Saved</span>
+          </div>
+        </div>
+        <div class="settings-grid" id="settings-grid"><!-- cards injected --></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+<div class="modal-root hidden" id="modal-root"></div>
+
+
+<template id="tpl-dl-row">
+  <div class="dl-row">
+    <span class="dl-type"></span>
+    <div class="dl-main">
+      <div class="dl-line1">
+        <span class="dl-name"></span>
+        <span class="dl-status"></span>
+      </div>
+      <div class="dl-progress"><div class="dl-fill"><div class="dl-sheen"></div></div></div>
+      <div class="dl-line2">
+        <span class="dl-done"></span>
+        <span class="dl-speed"></span>
+        <span class="dl-eta"></span>
+      </div>
+    </div>
+    <div class="dl-actions">
+      <button class="icon-btn dl-toggle" title="Pause / resume"></button>
+      <button class="icon-btn dl-open" title="Show in folder"></button>
+      <button class="icon-btn dl-reveal" title="Copy source URL"></button>
+      <button class="icon-btn dl-remove" title="Remove from list"></button>
+    </div>
+  </div>
+</template>
+
+<script src="/static/js/icons.js"></script>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/ui.js"></script>
+<script src="/static/js/state.js"></script>
+<script src="/static/js/views/direct.js"></script>
+<script src="/static/js/views/downloads.js"></script>
+<script src="/static/js/views/settings.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
