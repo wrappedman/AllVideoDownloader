@@ -29,5 +29,13 @@ java -Davd.assets="$ROOT/app/src/main/assets/web" \
      -cp "$OUT:$KOTLIN_HOME/lib/kotlin-stdlib.jar" dev.JvmTestsKt
 
 echo
+echo "==> running the real frontend against the real API (jsdom)"
+if [ -d "$HERE/ui/node_modules" ]; then
+    KOTLIN_STDLIB="$KOTLIN_HOME/lib/kotlin-stdlib.jar" node "$HERE/ui/ui_test.mjs"
+else
+    echo "    skipped: run 'npm install' in android/dev/ui to enable this suite"
+fi
+
+echo
 echo "==> running end-to-end download tests"
 java -cp "$OUT:$KOTLIN_HOME/lib/kotlin-stdlib.jar" dev.DownloadTestsKt

@@ -102,7 +102,7 @@ Tool locations can be overridden: `KOTLIN_HOME`, `ANDROID_JAR`, `DX_JAR`,
 ## Tests
 
 `dev/run_tests.sh` compiles `core/` + `api/` — which contain **no `android.*`
-imports** — for a desktop JVM and runs two suites:
+imports** — for a desktop JVM and runs three suites (163 checks):
 
 * `dev/JvmTests.kt` — 89 fixture checks ported from `tools/test_video_core.py`
   (HLS/MPD ladders, container sniffing, JSON, settings defaults, URL joining, the
@@ -116,11 +116,19 @@ imports** — for a desktop JVM and runs two suites:
   with byte-identical output, native HLS capture (3 segments concatenated in
   order), AES-128 encrypted HLS decryption, DASH refusal message, and the job
   lifecycle (pause/resume/cancel/clear-finished, `to_dict` keys).
+* `dev/ui/ui_test.mjs` — 27 checks that load the **real, unchanged `web/`
+  frontend** in jsdom against the real API server: shell/nav rendering,
+  settings cards fed by `/api/settings`, a settings change round-tripping
+  through `PUT`, websocket bootstrap, analyze of a live URL, click-to-download
+  → the job row appearing in the Downloads view with the file landing on disk
+  byte-for-byte, and an HLS ladder. Needs `npm install` once in `dev/ui/`
+  (jsdom + ws); the suite is skipped when those are absent.
 
 ## What is *not* verified
 
 There is no emulator, no `adb` and no Android device in this environment, so the
-APK was **not** installed or launched. Verification of the artifact itself is
+APK was **not** installed or launched, and `MainActivity` / `DownloadService` /
+`SafExport` / `AvdFileProvider` were not executed on Android. Verification of the artifact itself is
 static: `aapt2 dump badging`, `apksigner verify` (v1+v2+v3), and an androguard
 parse (valid APK, package/activity/service/provider, permissions, `resources.arsc`
 tables). Everything that does not need Android framework classes — i.e. the whole
