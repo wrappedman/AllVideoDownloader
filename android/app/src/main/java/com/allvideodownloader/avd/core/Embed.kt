@@ -420,6 +420,32 @@ object Embed {
     )
     private val NEAR_RES_RE = Pattern.compile("^(?:2160|1440|1080|720|540|480|360|270|240|180|144)\\s*[pP]?$")
 
+    /**
+     * The rung name hidden in a player-config key: `video_url_high` → HD,
+     * `video_url_low` → SD. Tube CDNs serve opaque paths (`/a8f3c1.mp4`), so
+     * without this every chip would read "MP4" and the user could not tell the
+     * qualities apart.
+     */
+    private fun labelFromKey(keyIn: String): String {
+        val key = keyIn.lowercase(Locale.ROOT)
+        // `video_url_720` / `url_1080` — the number in the key IS the rung
+        Regex("(?<!\\d)(2160|1440|1080|720|540|480|360|270|240)(?!\\d)").find(key)?.let {
+            return "${it.value}p"
+        }
+        return when {
+            "4k" in key || "uhd" in key -> "4K"
+            "qhd" in key -> "1440p"
+            "fhd" in key -> "1080p"
+            "high" in key || "hd" in key -> "HD"
+            "low" in key || "sd" in key -> "SD"
+            "medium" in key || "mid" in key -> "Medium"
+            "alt" in key -> "Alt"
+            "hls" in key -> "HLS"
+            "dash" in key -> "DASH"
+            else -> ""
+        }
+    }
+
     private fun asLabel(raw: String): String {
         val cand = (raw).trim()
         if (NEAR_RES_RE.matcher(cand).matches()) return if (cand.endsWith("p", true)) cand else "${cand}p"
@@ -502,7 +528,10 @@ object Embed {
                 if (!urlShaped && !(value.startsWith("http") || value.startsWith("//") ||
                         value.startsWith("/") || value.startsWith("function/"))
                 ) continue
-                add(value, origin, labelNear(scan, value), licenseCode)
+                // a .m3u8/.mpd keeps its own "HLS (auto)" rung name
+                val streamish = Regex("\\.(?:m3u8|mpd)(?:$|[?#])", RegexOption.IGNORE_CASE).containsMatchIn(value)
+                val near = labelNear(scan, value)
+                add(value, origin, near.ifEmpty { if (streamish) "" else labelFromKey(key) }, licenseCode)
             }
         }
 

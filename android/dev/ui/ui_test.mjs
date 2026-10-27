@@ -63,11 +63,26 @@ const media = createServer((req, res) => {
     }
     return;
   }
+  if (url === "/tube/clip") { res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }); res.end(TUBE_PAGE); return; }
+  if (url === "/clip720.mp4" || url === "/clip480.mp4") {
+    res.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": MP4.length, "Accept-Ranges": "bytes" });
+    res.end(MP4);
+    return;
+  }
   if (url === "/master.m3u8") { res.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" }); res.end(MASTER); return; }
   if (url === "/media.m3u8") { res.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" }); res.end(MEDIA); return; }
   if (url.startsWith("/seg")) { res.writeHead(200, { "Content-Type": "video/mp2t" }); res.end(SEG); return; }
   res.writeHead(404); res.end();
 });
+const TUBE_PAGE = `<!DOCTYPE html><html><head><title>Clip - Tube</title>
+<meta property="og:image" content="/thumb.jpg"></head><body>
+<script>
+  var html5player = {
+    video_url_720: '/clip720.mp4',
+    video_url_low: '/clip480.mp4'
+  };
+</script></body></html>`;
+
 const mediaPort = await new Promise((resolve) => media.listen(0, "127.0.0.1", () => resolve(media.address().port)));
 const MEDIA_BASE = `http://127.0.0.1:${mediaPort}`;
 console.log(`media host: ${MEDIA_BASE}`);
@@ -268,6 +283,36 @@ check(await until(() => doc.querySelector("#analyze-stage .chip-set .chip"), 200
 check(doc.querySelectorAll("#analyze-stage .chip-set .chip").length === hls.formats.length,
   "every quality the backend found got a chip");
 
+
+// ── 5b. a tube-style page: chips must appear and the button must download ──
+console.log("== page → qualities → download");
+directNav.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+await sleep(150);
+$("#direct-url").value = `${MEDIA_BASE}/tube/clip`;
+$("#direct-url").dispatchEvent(new window.Event("input", { bubbles: true }));
+$("#btn-analyze").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+check(await until(() => doc.querySelector("#analyze-stage .chip-set .chip"), 20000, "page chips"),
+  "a page's player config yields quality chips");
+const chipLabels = [...doc.querySelectorAll("#analyze-stage .chip-set .chip")].map((c) => c.textContent.trim());
+check(chipLabels.length >= 2, `chip labels: ${chipLabels.join(" | ")}`);
+check(chipLabels.some((l) => /1080|720|480/.test(l)), "chips are labelled with their resolution");
+check(new Set(chipLabels).size === chipLabels.length, `no two chips share a label: ${chipLabels.join(" | ")}`);
+const pageDl = [...doc.querySelectorAll("#analyze-stage .ac-actions button")].find((b) => /download/i.test(b.textContent || ""));
+check(!!pageDl, "the page card offers a download button");
+if (pageDl) {
+  pageDl.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  let pageJob = null;
+  for (let i = 0; i < 100 && !pageJob; i++) {
+    await sleep(150);
+    const { jobs } = await window.API.listDownloads();
+    pageJob = jobs.find((j) => j.url.includes("clip720.mp4") || j.url.includes("clip480.mp4") || j.url.includes("clip.mp4"));
+  }
+  check(!!pageJob, "clicking Download starts a real job");
+  if (pageJob) {
+    const finishedPage = await untilJob(pageJob.id, "done", 30000);
+    eq(finishedPage?.status, "done", `page download finished (${finishedPage?.progress_pct}%${finishedPage?.error ? ", " + finishedPage.error : ""})`);
+  }
+}
 
 // ── 6. the Android skin, measured on the live DOM ──────────────────────────
 console.log("== android skin");

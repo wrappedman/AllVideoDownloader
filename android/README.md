@@ -133,7 +133,7 @@ Tool locations can be overridden: `KOTLIN_HOME`, `ANDROID_JAR`, `DX_JAR`,
 ## Tests
 
 `dev/run_tests.sh` compiles `core/` + `api/` — which contain **no `android.*`
-imports** — for a desktop JVM and runs four suites (208 checks):
+imports** — for a desktop JVM and runs five suites (266 checks):
 
 * `dev/JvmTests.kt` — 89 fixture checks ported from `tools/test_video_core.py`
   (HLS/MPD ladders, container sniffing, JSON, settings defaults, URL joining, the
@@ -147,17 +147,29 @@ imports** — for a desktop JVM and runs four suites (208 checks):
   with byte-identical output, native HLS capture (3 segments concatenated in
   order), AES-128 encrypted HLS decryption, DASH refusal message, and the job
   lifecycle (pause/resume/cancel/clear-finished, `to_dict` keys).
+* `dev/PageTests.kt` — 51 checks on the reported bug "it finds the link but lists
+  no qualities, so I cannot download": a local server serves a tube-style page
+  whose player config holds the mp4 rungs, an HLS master, an `og:image` and ad
+  noise. It asserts the page becomes a `webmedia` card with a labelled ladder,
+  that **every** rung plans and downloads (the 1080 rung must be the exact file
+  the page named), that opaque CDN hashes still get distinct names from their
+  player slot (`video_url_high` → HD), that two slots meaning the same thing are
+  told apart instead of rendering `MP4 | MP4`, that a page with no media returns
+  an actionable `media_error` card (reason + phone-specific guidance) instead of
+  a dead "found it" card, and that a raw mp4 still produces a one-click `direct`
+  card.
 * `dev/ui/css_check.mjs` — 27 checks on the Android skin: it must parse cleanly,
   every rule must stay scoped to `html.android` (i.e. the desktop UI cannot be
   affected), the tab bar must be fixed to the bottom with content padded clear of
   it, touch targets must meet 44 px, dialogs must present as bottom sheets, and
   no frontend script may branch on being on Android.
-* `dev/ui/ui_test.mjs` — 45 checks that load the **real, unchanged `web/`
+* `dev/ui/ui_test.mjs` — 52 checks that load the **real, unchanged `web/`
   frontend** in jsdom against the real API server: shell/nav rendering,
   settings cards fed by `/api/settings`, a settings change round-tripping
   through `PUT`, websocket bootstrap, analyze of a live URL, click-to-download
   → the job row appearing in the Downloads view with the file landing on disk
-  byte-for-byte, and an HLS ladder — plus the skin measured on the live DOM
+  byte-for-byte, an HLS ladder, and the full page path (page URL → quality chips
+  → download → finished job) — plus the skin measured on the live DOM
   (computed layout of every landmark, and all 174 skin selectors resolving to
   real elements). Needs `npm install` once in `dev/ui/` (jsdom, ws, css-tree);
   the suite is skipped when those are absent.

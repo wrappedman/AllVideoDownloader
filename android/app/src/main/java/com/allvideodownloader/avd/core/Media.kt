@@ -192,6 +192,34 @@ object Media {
     }
 
     // ── quality ladders built from a page's own player config ─────────────
+    /**
+     * Rung order when the resolution itself is unknown: a slot named "High"
+     * belongs above a slot named "Low", and the player's unnamed base file
+     * sits between them.
+     */
+    private fun labelRank(label: String): Int {
+        val l = label.lowercase(Locale.ROOT)
+        return when {
+            "4k" in l || "uhd" in l || "2160" in l -> 60
+            "1080" in l || "fhd" in l -> 50
+            "high" in l || "hd" in l -> 45
+            "720" in l -> 40
+            "540" in l || "480" in l -> 30
+            "360" in l || "270" in l || "240" in l || "144" in l -> 10
+            "low" in l || "sd" in l -> 20
+            else -> 25
+        }
+    }
+
+    private fun humanSize(bytes: Long): String {
+        if (bytes < 1024) return "$bytes B"
+        val units = arrayOf("KB", "MB", "GB", "TB")
+        var v = bytes.toDouble()
+        var u = -1
+        do { v /= 1024; u++ } while (v >= 1024 && u < units.size - 1)
+        return if (v >= 100) "${v.toInt()} ${units[u]}" else String.format(Locale.ROOT, "%.1f %s", v, units[u])
+    }
+
     private fun sameVideo(vids: List<MutableMap<String, Any?>>): List<MutableMap<String, Any?>> {
         if (vids.size < 2) return vids
         val top = vids.maxByOrNull { it["score"].int() } ?: return vids
@@ -220,10 +248,28 @@ object Media {
                 "ext" to ext, "source" to c["source"].str(),
             ))
         }
+        // two rungs must never look identical: fall back to the size, then to a
+        // number, so "MP4 | MP4" becomes something the user can actually choose
+        val used = HashMap<String, Int>()
+        for (f in forms) {
+            val base = f["label"].str().ifEmpty { f["ext"].str().uppercase(Locale.ROOT) }
+            val n = (used[base.lowercase(Locale.ROOT)] ?: 0) + 1
+            used[base.lowercase(Locale.ROOT)] = n
+            if (n > 1) {
+                val size = f["size"].num().toLong()
+                f["label"] = if (size > 0) "$base · ${humanSize(size)}" else "$base · $n"
+            }
+        }
         forms.sortWith(Comparator { a, b ->
             val sa = if (a["ext"].str() in STREAM_EXTS) 0 else 1
             val sb = if (b["ext"].str() in STREAM_EXTS) 0 else 1
-            if (sa != sb) sa - sb else b["height"].int() - a["height"].int()
+            if (sa != sb) return@Comparator sa - sb
+            // a word-only rung ("High", "HD") has no height, so the label decides
+            // the order; identical words are settled by the real resolution
+            val ra = labelRank(a["label"].str())
+            val rb = labelRank(b["label"].str())
+            if (ra != rb) return@Comparator rb - ra
+            b["height"].int() - a["height"].int()
         })
         return forms
     }
@@ -432,21 +478,7 @@ object Media {
                     return sub
                 }
             }
-            val hints = ArrayList<String>()
-            val eLow = ytErr.lowercase(Locale.ROOT)
-            if ("cookie" in eLow || "could not copy" in eLow) {
-                hints.add("The cookie source could not be read — open Settings → Video & capture " +
-                    "and point <b>Cookies file</b> at an exported <code>cookies.txt</code>. " +
-                    "The app already retried this extraction without cookies.")
-            }
-            if (Config.settings().getString("ytdlp_browser_cookies").isEmpty()) {
-                hints.add("Browser cookies are not available on Android — export a " +
-                    "<code>cookies.txt</code> from a desktop browser and set it in " +
-                    "Settings → Video & capture.")
-            }
-            hints.add("yt-dlp on this device must be updated manually: drop a newer " +
-                "<code>yt-dlp</code> (or a Python that can run it) into the app's files " +
-                "directory, or use the page scan below.")
+            val hints = engineHints(pageInfo, ytErr)
             if (pageInfo["site"].str().isNotEmpty()) {
                 hints.add("<b>${pageInfo["site"].str()}</b> is in the built-in recipe list, so this " +
                     "refusal came from the site itself (region/age wall, removed video, or a " +
@@ -583,11 +615,69 @@ object Media {
                 }
             }
         }
+        // Nothing playable anywhere on the page: say why, instead of showing an
+        // empty "found it" card the user cannot act on.
+        if (candidates.isEmpty()) {
+            return linkedMapOf(
+                "kind" to "media_error", "url" to final,
+                "extractor" to findExtractor(final).ifEmpty {
+                    pageInfo["site"].str().ifEmpty { "page scan" }
+                },
+                "file_type" to "video", "site" to pageInfo["site"].str(),
+                "title" to pageInfo["title"].str().ifEmpty { FileKind.guessFilename(final, "video") },
+                "error" to friendlyErr(ytErr).ifEmpty {
+                    "No downloadable file was found on this page."
+                },
+                "hints" to engineHints(pageInfo, ytErr),
+                "candidates" to candidates,
+            )
+        }
         return linkedMapOf(
             "kind" to "page", "url" to final, "title" to pageInfo["title"].str(),
             "site" to pageInfo["site"].str(), "size" to size,
             "content_type" to ctype, "candidates" to candidates,
         )
+    }
+
+    /**
+     * Why a page produced no playable file, in terms of *this* platform.
+     *
+     * Android cannot `pip install` and — from Android 10 — cannot execute a
+     * binary that lives in app storage either, so "just install yt-dlp" is only
+     * true on old devices. The hints say what actually works here: the page's own
+     * player config, or a direct file link copied from a browser.
+     */
+    private fun engineHints(pageInfo: Map<String, Any?>, ytErr: String): MutableList<String> {
+        val hints = ArrayList<String>()
+        val eLow = ytErr.lowercase(Locale.ROOT)
+        val engine = YtCli.detect()
+        if (eLow.contains("cookie") || eLow.contains("could not copy")) {
+            hints.add("The cookie source could not be read — open Settings → Video &amp; capture " +
+                "and point <b>Cookies file</b> at an exported <code>cookies.txt</code>. " +
+                "The app already retried this extraction without cookies.")
+        }
+        if (!engine["use_cli"].bool()) {
+            hints.add("No yt-dlp binary was found on this device, so extractor-only sites " +
+                "(YouTube &amp; friends) cannot be resolved here. Android 10+ also refuses to " +
+                "execute binaries stored in app storage, so installing one only works on older " +
+                "systems — the engines that do work on a phone are the page's own player config " +
+                "(below) and direct <code>.mp4</code> / <code>.m3u8</code> links.")
+        } else {
+            hints.add("yt-dlp ${engine["version"].str()} is installed but this extraction failed — " +
+                "the site may have changed its player, or it is blocking non-browser clients.")
+        }
+        if (pageInfo["site"].str().isNotEmpty()) {
+            hints.add("<b>${pageInfo["site"].str()}</b> is in the built-in recipe list, so this " +
+                "refusal came from the site itself (region/age wall, removed video, or a " +
+                "player change) — not from a missing algorithm.")
+        }
+        hints.add("Bot walls (Cloudflare “Just a moment”, 403 to non-browsers) need TLS " +
+            "impersonation, which this Android build does not have — the page scan below still " +
+            "works without it.")
+        hints.add("If the page plays the video in your browser, open it there, long-press the " +
+            "player (or use the browser's download list) to copy the media link, then paste that " +
+            "here — a direct file or manifest always downloads.")
+        return hints
     }
 
     private fun magnetTitle(url: String): String {
