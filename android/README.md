@@ -130,10 +130,47 @@ Gradle + the Android SDK are installed.
 Tool locations can be overridden: `KOTLIN_HOME`, `ANDROID_JAR`, `DX_JAR`,
 `AAPT2`, `APKSIGNER`, `KEYSTORE`, `JAVA_HOME` (defaults live under `/tmp`).
 
+## Signing (when the Android build-tools are absent)
+
+`build.sh` uses Google's `apksigner.jar` when it can find one, and otherwise
+falls back to `tools/sign_apk.py`, which writes the same two schemes itself:
+
+* **v1** — `META-INF/MANIFEST.MF`, `META-INF/AVD.SF` and `META-INF/AVD.RSA`
+  (a PKCS#7 detached signature), so Android 6 and older can install the APK.
+* **v2** — the APK Signing Block with the AOSP algorithm ids (`0x0101` chunked
+  SHA-256 content digest, `0x0101` RSASSA-PKCS1-v1_5 signature) and the 1 MiB
+  chunking scheme. Android 11+ requires v2 for `targetSdk ≥ 30`, so a
+  "v1-only" or unsigned APK would simply not install.
+
+`tools/verify_apk.py` then re-derives the content digest from the file and
+checks the signature against the certificate's own key — the same checks
+`apksigner verify` performs, implemented without the SDK. The build fails if
+that verification fails. The signing key lives in
+`tools/debug-signing-key.DEBUG-ONLY.pem`: a **debug-only** self-signed identity,
+committed on purpose so that every build of this app shares one certificate
+(Android refuses an update signed by a different key). It is not a release key
+and must never be used for one.
+
+The fallback needs one Python module that is not in the standard library:
+`pip install cryptography`.
+
+## What YouTube support really is
+
+`core/Youtube.kt` talks to YouTube's own player endpoint, because the desktop
+build's `yt-dlp` binary cannot run on Android. It walks a client ladder
+(`ANDROID_VR` → `ANDROID` → `IOS` → `TVHTML5_SIMPLY_EMBEDDED_PLAYER` →
+`WEB_EMBEDDED_PLAYER` → `MWEB` → `TVHTML5` → `WEB`, 25 s total), then the embed
+page, then the watch page, and finally `core/YoutubeMirrors.kt` — public
+Invidious/Piped front-ends that fetch the video from *their* addresses. That
+last step is what makes a "Sign in to confirm you're not a bot" answer
+survivable: the bot check is decided by the caller's IP, not by the app's code.
+`tools.instances` is a plain list, so a dead mirror can be replaced without
+touching anything else.
+
 ## Tests
 
 `dev/run_tests.sh` compiles `core/` + `api/` — which contain **no `android.*`
-imports** — for a desktop JVM and runs six suites (302 checks):
+imports** — for a desktop JVM and runs six suites (320 checks):
 
 * `dev/JvmTests.kt` — 89 fixture checks ported from `tools/test_video_core.py`
   (HLS/MPD ladders, container sniffing, JSON, settings defaults, URL joining, the
@@ -158,7 +195,7 @@ imports** — for a desktop JVM and runs six suites (302 checks):
   an actionable `media_error` card (reason + phone-specific guidance) instead of
   a dead "found it" card, and that a raw mp4 still produces a one-click `direct`
   card.
-* `dev/YoutubeTests.kt` — 36 checks on the YouTube path, which on desktop was
+* `dev/YoutubeTests.kt` — 54 checks on the YouTube path, which on desktop was
   yt-dlp's job. A local server answers `/youtubei/v1/player` with the same JSON
   the real endpoint returns, and the suite asserts: every link shape resolves to
   a video id; the card carries the video's real title and a ladder ordered
@@ -166,8 +203,13 @@ imports** — for a desktop JVM and runs six suites (302 checks):
   under the right filename and the file on disk is byte-exact; a playability
   refusal ("Video unavailable") and a cipher-only answer each become a
   `media_error` card that says so instead of a dead end; a refused API still
-  recovers from the watch page's own URLs; and a page full of script noise
-  (`persist_identity`, `generate_204`, `m_base`) yields no junk rows.
+  recovers from the watch page's own URLs; a page full of script noise
+  (`persist_identity`, `generate_204`, `m_base`) yields no junk rows; and the
+  exact answer a VPN user gets — "LOGIN_REQUIRED — Sign in to confirm you're not
+  a bot" — ends in a real ladder borrowed from a mirror (which downloads), or,
+  when the mirrors refuse too, in a card that names the bot wall, says the VPN
+  is the thing to change and that the mirrors were tried. The embed-page route
+  and the cookies.txt header (only the matching host's cookies) are covered too.
 * `dev/ui/css_check.mjs` — 27 checks on the Android skin: it must parse cleanly,
   every rule must stay scoped to `html.android` (i.e. the desktop UI cannot be
   affected), the tab bar must be fixed to the bottom with content padded clear of

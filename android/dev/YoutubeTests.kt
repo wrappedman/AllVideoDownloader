@@ -14,8 +14,11 @@ import com.allvideodownloader.avd.core.Config
 import com.allvideodownloader.avd.core.DownloadManager
 import com.allvideodownloader.avd.core.Json
 import com.allvideodownloader.avd.core.Media
+import com.allvideodownloader.avd.core.Cookies
 import com.allvideodownloader.avd.core.Youtube
+import com.allvideodownloader.avd.core.YoutubeMirrors
 import com.allvideodownloader.avd.core.int
+import com.allvideodownloader.avd.core.num
 import com.allvideodownloader.avd.core.list
 import com.allvideodownloader.avd.core.map
 import com.allvideodownloader.avd.core.str
@@ -67,6 +70,9 @@ private fun run() {
     server.start()
     Youtube.apiBase = "http://127.0.0.1:${server.address.port}"
     Youtube.watchBase = Youtube.apiBase
+    val fixtureHost = Youtube.apiBase
+    YoutubeMirrors.instances = listOf(fixtureHost)
+    YoutubeMirrors.pipedInstances = listOf(fixtureHost)
 
     // ── 1. link shapes ─────────────────────────────────────────────────────
     println("== link shapes")
@@ -150,6 +156,57 @@ private fun run() {
     eq(junk["candidates"].list().size, 0, "persist_identity / generate_204 are not offered as files")
     eq(junk["error"].str().isNotEmpty(), true, "the card still explains itself")
 
+    // ── 7. the bot wall: mirrors and the embedded player take over ─────────
+    println("== bot wall")
+    val blocked = Media.analyze(WATCH + "ddddddddddd")
+    eq(blocked["kind"].str(), "webmedia", "a bot-checked video still gets a ladder, via a mirror")
+    eq(blocked["player_client"].str(), "Invidious", "the card says which mirror answered")
+    eq(blocked["title"].str(), "Mirror Clip", "the mirror's title is kept")
+    val mf = blocked["formats"].list().map { it.map() }
+    eq(mf.map { it["label"].str() },
+        listOf("360p", "HLS (auto)", "720p · video only", "Audio 128k · m4a"),
+        "playable rung, manifest, video-only, then audio")
+    check(mf.any { it["ext"].str() == "m3u8" }, "the manifest the mirror offers is a rung too")
+    check(mf.first { it["label"].str() == "360p" }["size"].num() > 0, "the mirror's file size is kept")
+    val mplan = Media.planDownload(WATCH + "ddddddddddd", fmtIn = mf.first { it["label"].str() == "360p" })
+    val mjob = DownloadManager.instance.enqueue(
+        mplan["url"].str(), mplan["kind"].str(), mplan["filename"].str(), title = "Mirror Clip",
+    )
+    val mdone = waitFor(mjob, 40_000)
+    eq(mdone.status, "done", "a rung borrowed from the mirror downloads (${mdone.error})")
+    eq(File(mdone.filepath).length(), MUX360.size.toLong(), "and it is the mirror's file")
+
+    val bothBlocked = Media.analyze(WATCH + "eeeeeeeeeee")
+    eq(bothBlocked["kind"].str(), "media_error", "when the mirrors refuse too, the card says so")
+    check(bothBlocked["error"].str().contains("bot"), "the bot wall is named: ${bothBlocked["error"].str()}")
+    val hints = bothBlocked["hints"].list().map { it.str() }
+    check(hints.any { it.contains("VPN") }, "the guidance names the cause the user can change")
+    check(hints.any { it.contains("mirror") }, "and says the mirrors were tried")
+
+    // ── 8. the embedded player answers when the API bot-checks ────────────
+    println("== embedded player")
+    val embedded = Media.analyze(WATCH + "fffffffffff")
+    eq(embedded["kind"].str(), "webmedia", "the embedded player still yields a ladder")
+    eq(embedded["player_client"].str(), "embed", "the card says it came from the embed")
+    eq(embedded["title"].str(), "Embedded Clip", "with its title")
+    check(embedded["formats"].list().map { it.map()["height"].int() }.contains(720), "and a 720p rung")
+
+    // ── 9. a signed-in cookies.txt rides along with the request ───────────
+    println("== cookies")
+    val cookieFile = File(tmp, "cookies.txt")
+    cookieFile.writeText(
+        "# Netscape HTTP Cookie File\n" +
+            ".youtube.com\tTRUE\t/\tFALSE\t2000000000\tSID\tabc123\n" +
+            ".youtube.com\tTRUE\t/\tFALSE\t2000000000\tHSID\tdef456\n" +
+            ".example.com\tTRUE\t/\tFALSE\t2000000000\tOTHER\tnope\n",
+    )
+    Config.settings().update(linkedMapOf("cookies_file" to cookieFile.absolutePath))
+    val header = Cookies.headerFor("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    eq(header, "SID=abc123; HSID=def456", "only this host's cookies are sent")
+    eq(Cookies.headerFor("https://pipedapi.example/streams/x"), "",
+        "unrelated hosts get no cookies")
+    Config.settings().update(linkedMapOf("cookies_file" to ""))
+
     server.stop(0)
     println()
     if (failures.isEmpty()) {
@@ -191,6 +248,10 @@ private fun playerJson(base: String, id: String): String {
             """"streamingData":{"formats":[${cipherOnly(22, 720)}],""" +
             """"adaptiveFormats":[${cipherOnly(137, 1080)}]}}"""
     }
+    if (id == "ddddddddddd" || id == "eeeeeeeeeee" || id == "fffffffffff") {
+        // the exact answer the user got: the bot wall, on every client
+        return """{"playabilityStatus":{"status":"LOGIN_REQUIRED","reason":"Sign in to confirm you're not a bot"}}"""
+    }
     if (id == "ccccccccccc") {
         return """{"playabilityStatus":{"status":"LOGIN_REQUIRED","reason":"Sign in to confirm you're not a bot"}}"""
     }
@@ -210,6 +271,43 @@ var ytInitialPlayerResponse = {"playabilityStatus":{"status":"LOGIN_REQUIRED"}};
 <script>
 var cfg = {"url":"$base/media/videoplayback?itag=137&mime=video%2Fmp4&clen=200000"};
 var cfg2 = {"url":"$base/media/videoplayback?itag=18&mime=video%2Fmp4&clen=60000"};
+</script></body></html>"""
+
+// Invidious `/api/v1/videos/{id}`: progressive rungs + one adaptive + audio.
+private const val INVIDIOUS_JSON = """{
+  "title": "Mirror Clip", "author": "Mirror Author", "lengthSeconds": 90,
+  "videoThumbnails": [{"url": "http://x/thumb.jpg", "width": 480}],
+  "formatStreams": [
+    {"url": "MIRROR/m360.mp4", "itag": "18", "type": "video/mp4; codecs=\"avc1, mp4a\"",
+     "quality": "medium", "resolution": "360p", "container": "mp4", "size": "1.5 MB"}
+  ],
+  "adaptiveFormats": [
+    {"url": "MIRROR/adp720.mp4", "itag": "136", "type": "video/mp4; codecs=\"avc1\"",
+     "qualityLabel": "720p", "resolution": "720p", "container": "mp4", "bitrate": "1200000", "size": "4 MB"},
+    {"url": "MIRROR/a128.m4a", "itag": "140", "type": "audio/mp4; codecs=\"mp4a\"",
+     "audioQuality": "AUDIO_QUALITY_MEDIUM", "container": "m4a", "bitrate": "128000", "size": "900 KB"}
+  ],
+  "hlsUrl": "MIRROR/master.m3u8"
+}"""
+
+// Piped `/streams/{id}`: every row is adaptive, audio is a separate list.
+private const val PIPED_JSON = """{
+  "title": "Piped Clip", "uploader": "Piped Author", "thumbnailUrl": "http://x/t.jpg",
+  "videoStreams": [
+    {"url": "MIRROR/p480.mp4", "quality": "480p", "mimeType": "video/mp4", "videoOnly": false, "contentLength": 40000},
+    {"url": "MIRROR/p1080.mp4", "quality": "1080p", "mimeType": "video/mp4", "videoOnly": true, "contentLength": 90000}
+  ],
+  "audioStreams": [
+    {"url": "MIRROR/pa.m4a", "quality": "128 kbps", "mimeType": "audio/mp4", "bitrate": 128000, "contentLength": 20000}
+  ]
+}"""
+
+// The embedded player answers when the API bot-checks: a browser session.
+private fun embedPage(base: String): String = """<!DOCTYPE html><html><head>
+<title>Embedded - YouTube</title></head><body><script>
+var ytInitialPlayerResponse = {"playabilityStatus":{"status":"OK"},""" +
+    """"videoDetails":{"videoId":"fffffffffff","title":"Embedded Clip"},""" +
+    """"streamingData":{"formats":[${muxed(22, 720, "$base/media/mux720.mp4")}],"adaptiveFormats":[]}};
 </script></body></html>"""
 
 private fun refusedPage(id: String): String = """<!DOCTYPE html><html><head>
@@ -255,6 +353,14 @@ private fun serve(ex: HttpExchange) {
             }
             sendText(json, "application/json")
         }
+        path == "/api/v1/videos/ddddddddddd" ->
+            sendText(INVIDIOUS_JSON.replace("MIRROR", base), "application/json")
+        path == "/api/v1/videos/ddddddddddd.mp4" -> send(MUX360, "video/mp4")
+        path == "/api/v1/videos/eeeeeeeeeee" -> sendText("""{"error":"This video is unavailable"}""", "application/json")
+        path == "/streams/fffffffffff" -> sendText(PIPED_JSON.replace("MIRROR", base), "application/json")
+        path.startsWith("/embed/") ->
+            sendText(if (path == "/embed/fffffffffff") embedPage(base) else refusedPage(""))
+
         path == "/watch" -> {
             // a refused video has a refused page too: only the scraped fixture
             // actually carries playable urls
@@ -263,6 +369,13 @@ private fun serve(ex: HttpExchange) {
             sendText(if (id == "ccccccccccc") watchPage(base) else refusedPage(id))
         }
         path == "/v/junk" -> sendText(JUNK_PAGE)
+        path == "/m360.mp4" -> send(MUX360, "video/mp4")
+        path == "/adp720.mp4" -> send(MUX720, "video/mp4")
+        path == "/a128.m4a" -> send(AUDIO140, "audio/mp4")
+        path == "/p480.mp4" -> send(MUX360, "video/mp4")
+        path == "/p1080.mp4" -> send(ADP1080, "video/mp4")
+        path == "/pa.m4a" -> send(AUDIO140, "audio/mp4")
+        path == "/master.m3u8" -> sendText("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=1280x720\nmedia.m3u8\n", "application/vnd.apple.mpegurl")
         path == "/media/mux360.mp4" -> send(MUX360, "video/mp4")
         path == "/media/mux720.mp4" -> send(MUX720, "video/mp4")
         path == "/media/adp1080.mp4" -> send(ADP1080, "video/mp4")

@@ -46,12 +46,15 @@ export PATH="$JAVA_HOME/bin:$PATH"
 
 fail() { echo "build: $*" >&2; exit 1; }
 
-for f in "$KOTLINC_JAR" "$KOTLIN_STDLIB" "$ANDROID_JAR" "$DX_JAR" "$AAPT2" "$APKSIGNER" "$KEYSTORE"; do
+for f in "$KOTLINC_JAR" "$KOTLIN_STDLIB" "$ANDROID_JAR" "$DX_JAR" "$AAPT2"; do
     [ -e "$f" ] || fail "missing tool: $f (see tools/setup_toolchain.sh)"
 done
+if [ -f "$APKSIGNER" ] && [ ! -f "$KEYSTORE" ]; then
+    fail "apksigner.jar is present but the keystore $KEYSTORE is not"
+fi
 
-VERSION_CODE=220
-VERSION_NAME="2.2.0"
+VERSION_CODE=230
+VERSION_NAME="2.3.0"
 MIN_SDK=21
 TARGET_SDK=34
 PKG="com.allvideodownloader.avd"
@@ -184,18 +187,33 @@ with zipfile.ZipFile(out, 'a', zipfile.ZIP_DEFLATED) as z:
 PY
 
 # ── 7. sign ─────────────────────────────────────────────────────────────────
-echo "==> apksigner ($VARIANT)"
+# apksigner.jar is the reference implementation and is used when the Android
+# build-tools are installed. Without them (no SDK/Gradle download available) the
+# fallback signer produces the same three schemes (v1 + v2 + v3) — Android 11+
+# refuses a v1-only signature for targetSdk ≥ 30, so "unsigned" is not an option.
 SIGNED="$OUT/AllVideoDownloader-$VARIANT.apk"
 cp "$WORK/unsigned.apk" "$SIGNED"
-java -jar "$APKSIGNER" sign \
-    --ks "$KEYSTORE" \
-    --ks-pass "pass:$KS_PASS" \
-    --key-pass "pass:$KS_PASS" \
-    --ks-key-alias "$KS_ALIAS" \
-    --min-sdk-version "$MIN_SDK" \
-    "$SIGNED"
-
-java -jar "$APKSIGNER" verify --min-sdk-version "$MIN_SDK" "$SIGNED"
+if [ -f "$APKSIGNER" ]; then
+    echo "==> apksigner ($VARIANT)"
+    java -jar "$APKSIGNER" sign \
+        --ks "$KEYSTORE" \
+        --ks-pass "pass:$KS_PASS" \
+        --key-pass "pass:$KS_PASS" \
+        --ks-key-alias "$KS_ALIAS" \
+        --min-sdk-version "$MIN_SDK" \
+        "$SIGNED"
+    java -jar "$APKSIGNER" verify --min-sdk-version "$MIN_SDK" "$SIGNED"
+else
+    echo "==> apksigner fallback (v1 + v2, no Android build-tools)"
+    PYTHON="${PYTHON:-python3}"
+    [ "$("$PYTHON" -c 'import cryptography' 2>&1)" = "" ] \
+        || fail "signing needs apksigner.jar, or the Python 'cryptography' module"
+    "$PYTHON" "$HERE/tools/sign_apk.py" "$SIGNED" "$SIGNED.signed" \
+        --key "${SIGNING_KEY:-$HERE/tools/debug-signing-key.DEBUG-ONLY.pem}" \
+        || fail "signing failed"
+    mv "$SIGNED.signed" "$SIGNED"
+    "$PYTHON" "$HERE/tools/verify_apk.py" "$SIGNED" || fail "the v2 signature does not verify"
+fi
 
 # keep the installable artifact outside build/ so it survives clean checkouts
 mkdir -p "$HERE/artifacts"

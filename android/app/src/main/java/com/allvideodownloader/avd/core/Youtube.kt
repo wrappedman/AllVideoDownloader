@@ -36,6 +36,8 @@ object Youtube {
         val number: Int,
         val userAgent: String,
         val extra: Map<String, Any?> = emptyMap(),
+        /** Siblings of `context.client` — embedded clients need `thirdParty`. */
+        val contextExtra: Map<String, Any?> = emptyMap(),
     )
 
     val CLIENTS: List<Client> = listOf(
@@ -57,6 +59,25 @@ object Youtube {
             "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X)",
             mapOf("deviceMake" to "Apple", "deviceModel" to "iPhone16,2", "osName" to "iPhone", "osVersion" to "18.1.0.22B83"),
         ),
+        // Embedded players answer with plain URLs without a PO token, because the
+        // page that hosts them is already a real browser session.
+        Client(
+            "TVHTML5_SIMPLY_EMBEDDED_PLAYER", "2.0", 85,
+            "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
+            mapOf("clientScreen" to "EMBED"),
+            mapOf("thirdParty" to linkedMapOf<String, Any?>("embedUrl" to "https://www.youtube.com/")),
+        ),
+        Client(
+            "WEB_EMBEDDED_PLAYER", "1.20250101.00.00", 56, Net.UA,
+            mapOf("clientScreen" to "EMBED"),
+            mapOf("thirdParty" to linkedMapOf<String, Any?>("embedUrl" to "https://www.youtube.com/")),
+        ),
+        Client(
+            "MWEB", "2.20250101.00.00", 2,
+            "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) " +
+                "Chrome/131.0.0.0 Mobile Safari/537.36",
+        ),
+        Client("TVHTML5", "7.20250101.00.00", 7, "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version"),
         Client("WEB", "2.20250101.00.00", 1, Net.UA),
     )
 
@@ -210,6 +231,7 @@ object Youtube {
                 "utcOffsetMinutes" to 0,
             ) + client.extra),
         )
+        for ((k, v) in client.contextExtra) ctx[k] = v
         return Json.write(
             linkedMapOf<String, Any?>(
                 "context" to ctx,
@@ -220,14 +242,20 @@ object Youtube {
         )
     }
 
-    private fun headers(client: Client): Map<String, String> = linkedMapOf(
-        "User-Agent" to client.userAgent,
-        "X-Youtube-Client-Name" to client.number.toString(),
-        "X-Youtube-Client-Version" to client.version,
-        "X-Youtube-Client-Format-Is-Hls" to "false",
-        "Origin" to apiBase,
-        "Referer" to "$watchBase/",
-    )
+    private fun headers(client: Client): Map<String, String> {
+        val h = linkedMapOf(
+            "User-Agent" to client.userAgent,
+            "X-Youtube-Client-Name" to client.number.toString(),
+            "X-Youtube-Client-Version" to client.version,
+            "X-Youtube-Client-Format-Is-Hls" to "false",
+            "Origin" to apiBase,
+            "Referer" to "$watchBase/",
+        )
+        // a signed-in cookies.txt is the request's only proof of being a human
+        val cookie = Cookies.headerFor("$watchBase/")
+        if (cookie.isNotEmpty()) h["Cookie"] = cookie
+        return h
+    }
 
     /**
      * The card for a YouTube link: a `webmedia` ladder when a client hands out
@@ -275,12 +303,25 @@ object Youtube {
             reason = if (reason.isEmpty()) "${client.name} offered no playable URL" else reason
         }
 
-        // Last resort: the watch page itself sometimes carries plain googlevideo
-        // URLs (and always carries the title), even when the API refuses.
+        // Last resort inside YouTube itself: the embed and watch pages sometimes
+        // carry plain googlevideo URLs even when the API refuses (the embedded
+        // player is served to a browser session, which is what the app is).
         pageFallback(url, id)?.let { return it }
+
+        // YouTube's bot check is answered per *IP*. A public front-end fetching
+        // the video from its own address sidesteps it entirely.
+        var mirrorsTried = false
+        val viaMirror = try {
+            mirrorsTried = true
+            YoutubeMirrors.card(url, id)
+        } catch (_: Exception) {
+            null
+        }
+        if (viaMirror != null) return viaMirror
 
         return errorCard(
             url,
+            mirrorsTried,
             when {
                 refusalReason.isNotEmpty() -> refusalReason
                 sawCipherOnly ->
@@ -307,16 +348,28 @@ object Youtube {
     )
 
     private fun pageFallback(url: String, id: String): MutableMap<String, Any?>? {
+        // The embed page is served to a browser session, so it is the more likely
+        // of the two to hand out unsigned URLs when the API is bot-checking.
+        for (target in listOf("$watchBase/embed/$id?autoplay=1", "$watchBase/watch?v=$id&bpctr=9999999999&has_verified=1")) {
+            scrapePlayerPage(url, target)?.let { return it }
+        }
+        return null
+    }
+
+    private fun scrapePlayerPage(url: String, pageUrl: String): MutableMap<String, Any?>? {
+        val cookie = Cookies.headerFor(pageUrl)
         val (html, _, _) = Net.fetchText(
-            "$watchBase/watch?v=$id&bpctr=9999999999&has_verified=1",
+            pageUrl,
             referer = "$watchBase/",
+            headers = if (cookie.isEmpty()) null else mapOf("Cookie" to cookie),
             timeoutSec = 16,
         )
         if (html.isEmpty()) return null
 
         extractJsonObject(html, "ytInitialPlayerResponse")?.let { json ->
             parsePlayer(Json.parseOrNull(json), url)?.let { card ->
-                card["player_client"] = "page"
+                card["player"] = if ("/embed/" in pageUrl) "YouTube embed page" else "YouTube watch page"
+                card["player_client"] = if ("/embed/" in pageUrl) "embed" else "page"
                 return card
             }
         }
@@ -351,13 +404,13 @@ object Youtube {
             "file_type" to "video",
             "title" to pageTitle(html).ifEmpty { FileKind.guessFilename(url, "YouTube video") },
             "site" to "YouTube",
-            "player" to "YouTube watch page",
+            "player" to if ("/embed/" in pageUrl) "YouTube embed page" else "YouTube watch page",
             "thumbnail" to "",
             "referer" to "$watchBase/",
             "found_on_page" to url,
             "formats" to formats,
             "formats_total" to formats.size,
-            "player_client" to "page",
+            "player_client" to if ("/embed/" in pageUrl) "embed" else "page",
             "ffmpeg" to Ffmpeg.find().available,
             "needs_ffmpeg_merge" to false,
         )
@@ -397,7 +450,7 @@ object Youtube {
         return null
     }
 
-    private fun errorCard(url: String, reason: String): MutableMap<String, Any?> = linkedMapOf(
+    private fun errorCard(url: String, mirrorsTried: Boolean, reason: String): MutableMap<String, Any?> = linkedMapOf(
         "kind" to "media_error",
         "url" to url,
         "extractor" to "youtube",
@@ -406,11 +459,22 @@ object Youtube {
         "title" to FileKind.guessFilename(url, "YouTube video"),
         "error" to reason,
         "hints" to mutableListOf(
-            "YouTube gates its player per client and per region, so a refusal here usually " +
-                "means “try another client”, not “no video”: retry once, and if it repeats the " +
-                "video is likely age/region-locked or bot-checked.",
-            "This build asks YouTube directly (no yt-dlp binary exists for Android), so it " +
-                "cannot solve a bot check or decipher a signature-protected URL.",
+            "A “Sign in to confirm you're not a bot” answer is about the network you are on, " +
+                "not about this video: YouTube shows it to VPN, proxy and datacentre addresses. " +
+                "Switching the VPN off (or to another country) and pressing Retry usually " +
+                "changes the answer.",
+            if (mirrorsTried) {
+                "This build also tried ${YoutubeMirrors.instances.size} Invidious and " +
+                    "${YoutubeMirrors.pipedInstances.size} Piped mirrors, which fetch the video " +
+                    "from their own addresses — none of them answered with a playable ladder."
+            } else {
+                "This build tries YouTube's own player API (several clients), the embed and " +
+                    "watch pages, and public Invidious/Piped mirrors — no binary such as yt-dlp " +
+                    "is involved, because Android cannot run one from app storage."
+            },
+            "Signing in on YouTube and exporting a <code>cookies.txt</code> into " +
+                "Settings → Video &amp; capture is the one route that beats a bot check without " +
+                "changing your network — the app sends those cookies with the player request.",
             "Anything the page hands out as a plain file or <code>.m3u8</code> still downloads " +
                 "here — open the video in your browser and paste the media link if the extractor " +
                 "keeps being refused.",

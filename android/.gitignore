@@ -1,2 +1,6 @@
 build/
+tools/node_modules/
 dev/ui/node_modules/
+.venv/
+__pycache__/
+*.log

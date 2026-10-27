@@ -94,6 +94,42 @@ object Cookies {
         browserFailure = ""
     }
 
+    /**
+     * Netscape `cookies.txt` → a `Cookie:` header for [url] ("" when nothing
+     * matches).
+     *
+     * yt-dlp accepts the same file through `--cookies`, but the app's YouTube
+     * path talks to the player endpoint itself, so it needs the header form.
+     * Signing in is the one way to answer a bot check without changing networks.
+     */
+    fun headerFor(url: String): String {
+        if (!fileUsable()) return ""
+        val host = try {
+            (UrlKit.parse(url).netloc).lowercase(Locale.ROOT).substringBefore(':').substringAfterLast('@')
+        } catch (_: Exception) {
+            return ""
+        }
+        if (host.isEmpty()) return ""
+        val pairs = ArrayList<String>()
+        try {
+            for (line in File(cookieFile()).readLines()) {
+                val raw = if (line.startsWith("#HttpOnly_")) line.removePrefix("#HttpOnly_") else line
+                if (raw.trim().isEmpty() || raw.startsWith("#")) continue
+                val f = raw.split("\t")
+                if (f.size < 7) continue
+                val domain = f[0].trim().lowercase(Locale.ROOT).trimStart('.')
+                val name = f[5].trim()
+                val value = f[6].trim()
+                if (name.isEmpty() || domain.isEmpty()) continue
+                if (host != domain && !host.endsWith(".$domain")) continue
+                pairs.add("$name=$value")
+            }
+        } catch (_: Exception) {
+            return ""
+        }
+        return pairs.joinToString("; ")
+    }
+
     // ── flags for the yt-dlp CLI ──────────────────────────────────────────
     fun ytdlpFlags(): List<String> {
         if (fileUsable()) return listOf("--cookies", cookieFile())
