@@ -407,7 +407,8 @@ object Media {
         val ext = FileKind.urlExtension(url)
         if (ext in FileKind.STREAM_EXTS) return streamResult(url, refererIn)
 
-        // 0) Sites whose stream only exists behind a JSON endpoint (Aparat, Filimo)
+        // 0) Sites whose stream only exists behind a JSON endpoint (Aparat, Filimo,
+        //    YouTube — the last one is what the desktop build used yt-dlp for)
         adapterCard(url, refererIn)?.let { return it }
 
         // 1) yt-dlp extractor registry — YouTube & friends
@@ -885,10 +886,16 @@ object Media {
                 "meta" to linkedMapOf<String, Any?>("format" to fmt["format"].str(), "quality" to fmt["label"].str()),
             )
         }
-        return linkedMapOf(
+        val plan = linkedMapOf<String, Any?>(
             "url" to url, "kind" to "http",
             "title" to title.ifEmpty { FileKind.guessFilename(url) },
-            "file_type" to FileKind.classify(url), "meta" to LinkedHashMap<String, Any?>(),
+            "file_type" to fmt?.get("file_type").str().ifEmpty { FileKind.classify(url) },
+            "meta" to LinkedHashMap<String, Any?>(),
         )
+        // an adapter that already knows the name (YouTube's title + rung) keeps it;
+        // otherwise the downloader derives one from the URL as before
+        val given = fmt?.get("filename").str() ?: ""
+        if (given.isNotEmpty()) plan["filename"] = given
+        return plan
     }
 }

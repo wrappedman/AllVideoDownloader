@@ -200,7 +200,8 @@ fun main() {
     val kt = Sites.candidates(KT, "https://www.txxx.com/videos/123/x")
     eq(kt.filter { it["height"].int() != 0 }.map { it["height"].int() }, listOf(1080, 720, 480), "kt ladder ordered")
     eq(kt.last()["quality"].str(), "Preview", "preview rung labelled Preview")
-    check(Adapters.ADAPTERS.size == 2, "aparat + filimo adapters registered")
+    check(Adapters.ADAPTERS.map { it.key } == listOf("aparat", "filimo", "youtube"),
+        "aparat + filimo + youtube adapters registered")
 
     // ── 8. embed extraction ────────────────────────────────────────────────
     section("embed")
@@ -268,7 +269,7 @@ fun main() {
     val sites = Json.parse(httpGetRaw("$base/api/sites")).map()
     check(sites["count"].int() >= 60, "/api/sites exposes ${sites["count"].int()} recipes")
     check(sites["recipes"].list().size == sites["count"].int(), "recipe list length matches count")
-    check(sites["adapters"].list().size == 2, "adapters listed")
+    check(sites["adapters"].list().size == 3, "adapters listed")
 
     val meta = Json.parse(httpGetRaw("$base/api/meta")).map()
     eq(meta["app"].str(), "All Video Downloader", "/api/meta app name")

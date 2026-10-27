@@ -58,6 +58,18 @@ object Embed {
         Pattern.CASE_INSENSITIVE,
     )
 
+    /**
+     * What a media URL looks like when it has no file extension (token-guarded
+     * CDN endpoints, YouTube's `videoplayback`, HLS routes).
+     */
+    private val MEDIA_SHAPE_RE = Pattern.compile(
+        "\\.(?:$EXTS)(?:$|[?#/])" +
+            "|videoplayback|mime=(?:video|audio)|[?&](?:format|type)=(?:mp4|webm|m3u8|dash)" +
+            "|/(?:hls|dash|manifest|playlist|stream|streams|media|video|videos|videoplayback)/" +
+            "|(?:manifest|playlist|master)\\.(?:m3u8|mpd)|stream[_-]?url|playurl",
+        Pattern.CASE_INSENSITIVE,
+    )
+
     private val LOW_VALUE_RE = Pattern.compile(
         "thumb|poster|sprite|preview|trailer|sample|placeholder|logo|banner",
         Pattern.CASE_INSENSITIVE,
@@ -524,10 +536,11 @@ object Embed {
                 val value = m.group("v") ?: ""
                 if (value in kvsValues) continue
                 if (!VIDEO_KEY_RE.matcher(key).find() || ASSET_EXT_RE.matcher(value.lowercase(Locale.ROOT)).find()) continue
-                val urlShaped = Regex("\\.(?:$EXTS)(?:$|[?#/])", RegexOption.IGNORE_CASE).containsMatchIn(value)
-                if (!urlShaped && !(value.startsWith("http") || value.startsWith("//") ||
-                        value.startsWith("/") || value.startsWith("function/"))
-                ) continue
+                // A value is only a stream if it *looks* like one. Merely being
+                // absolute or rooted is not evidence: site scripts are full of
+                // "/generate_204", "/persist_identity", "/m_base" and friends,
+                // which used to fill the result card with rows that 404.
+                if (!MEDIA_SHAPE_RE.matcher(value).find()) continue
                 // a .m3u8/.mpd keeps its own "HLS (auto)" rung name
                 val streamish = Regex("\\.(?:m3u8|mpd)(?:$|[?#])", RegexOption.IGNORE_CASE).containsMatchIn(value)
                 val near = labelNear(scan, value)

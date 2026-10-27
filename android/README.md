@@ -133,7 +133,7 @@ Tool locations can be overridden: `KOTLIN_HOME`, `ANDROID_JAR`, `DX_JAR`,
 ## Tests
 
 `dev/run_tests.sh` compiles `core/` + `api/` — which contain **no `android.*`
-imports** — for a desktop JVM and runs five suites (266 checks):
+imports** — for a desktop JVM and runs six suites (302 checks):
 
 * `dev/JvmTests.kt` — 89 fixture checks ported from `tools/test_video_core.py`
   (HLS/MPD ladders, container sniffing, JSON, settings defaults, URL joining, the
@@ -158,6 +158,16 @@ imports** — for a desktop JVM and runs five suites (266 checks):
   an actionable `media_error` card (reason + phone-specific guidance) instead of
   a dead "found it" card, and that a raw mp4 still produces a one-click `direct`
   card.
+* `dev/YoutubeTests.kt` — 36 checks on the YouTube path, which on desktop was
+  yt-dlp's job. A local server answers `/youtubei/v1/player` with the same JSON
+  the real endpoint returns, and the suite asserts: every link shape resolves to
+  a video id; the card carries the video's real title and a ladder ordered
+  muxed → video-only → audio; the chosen rung plans to a plain http download
+  under the right filename and the file on disk is byte-exact; a playability
+  refusal ("Video unavailable") and a cipher-only answer each become a
+  `media_error` card that says so instead of a dead end; a refused API still
+  recovers from the watch page's own URLs; and a page full of script noise
+  (`persist_identity`, `generate_204`, `m_base`) yields no junk rows.
 * `dev/ui/css_check.mjs` — 27 checks on the Android skin: it must parse cleanly,
   every rule must stay scoped to `html.android` (i.e. the desktop UI cannot be
   affected), the tab bar must be fixed to the bottom with content padded clear of
@@ -189,3 +199,11 @@ tables). Everything that does not need Android framework classes — i.e. the wh
 engine and the whole HTTP/WebSocket API — is executed for real by the suites
 above. The remaining unverified surface is `MainActivity` (WebView + bridge),
 `DownloadService`, `SafExport` and `AvdFileProvider`.
+
+One more honest limit: this sandbox has no route to `youtube.com`, so the
+YouTube extractor (`core/Youtube.kt`) was validated against the player API's
+schema on a local fixture server, **not** against a live response. YouTube gates
+its player per client, per region and per video, and can start demanding a
+bot-check token at any time; the client ladder (`ANDROID_VR` → `ANDROID` → `IOS`
+→ `WEB`) plus the watch-page fallback exist for exactly that, and when all of
+them are refused the app says why instead of printing junk.

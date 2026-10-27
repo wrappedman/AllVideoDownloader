@@ -202,6 +202,38 @@ object Net {
     }
 
     /**
+     * POST a JSON body (the shape YouTube's player endpoint wants). Same
+     * browser-grade headers as [get]; never throws — a failed call returns the
+     * HTTP status with an empty body so the caller can report it.
+     */
+    fun postJson(
+        url: String,
+        body: String,
+        headers: Map<String, String> = emptyMap(),
+        referer: String = "",
+        timeoutSec: Int = 16,
+    ): HttpResult {
+        val hdrs = browserHeaders(referer, accept = "*/*")
+        hdrs["Content-Type"] = "application/json; charset=UTF-8"
+        hdrs["Accept-Encoding"] = "identity"
+        hdrs.putAll(headers)
+        val conn = open(url, hdrs, timeoutSec)
+        return try {
+            conn.requestMethod = "POST"
+            conn.doOutput = true
+            conn.setFixedLengthStreamingMode(body.toByteArray(Charsets.UTF_8).size)
+            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val status = conn.responseCode
+            val bytes = readAll(if (status >= 400) conn.errorStream else conn.inputStream)
+            HttpResult(status, url, headerMap(conn), bytes.toString(Charsets.UTF_8), bytes)
+        } catch (e: Exception) {
+            HttpResult(0, url, LinkedHashMap(), "", ByteArray(0))
+        } finally {
+            runCatching { conn.disconnect() }
+        }
+    }
+
+    /**
      * GET a page like a browser. Never throws: an empty text means "we got
      * nothing", which every caller already handles as "no candidates".
      */

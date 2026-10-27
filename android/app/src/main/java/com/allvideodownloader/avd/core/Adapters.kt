@@ -4,8 +4,9 @@ import java.util.Locale
 import java.util.regex.Pattern
 
 /**
- * Android port of `webfinder/core/adapters.py` — the two sites whose stream only
- * exists behind a JSON endpoint (Aparat, Filimo).
+ * Android port of `webfinder/core/adapters.py` — the sites whose stream only
+ * exists behind a JSON endpoint (Aparat, Filimo, and YouTube's player API,
+ * which on desktop was handled by the yt-dlp binary Android cannot run).
  *
  * Same split as the desktop module: a **pure parser** (no network, fixture
  * testable) and a thin fetcher. Everything else stays in the recipe table.
@@ -34,6 +35,11 @@ object Adapters {
         Pattern.CASE_INSENSITIVE,
     )
 
+    private val YOUTUBE_RE = Pattern.compile(
+        "^https?://(?:[a-z0-9-]+\\.)*(?:youtu\\.be|youtube\\.com|youtube-nocookie\\.com)/",
+        Pattern.CASE_INSENSITIVE,
+    )
+
     val APARAT = Adapter(
         "aparat", "Aparat", APARAT_RE, priority = true,
         note = "public videohash API → every CDN profile (144p…1080p) with sizes",
@@ -43,7 +49,12 @@ object Adapters {
         note = "TV partner API → signed HLS manifest",
     )
 
-    val ADAPTERS = listOf(APARAT, FILIMO)
+    val YOUTUBE = Adapter(
+        "youtube", "YouTube", YOUTUBE_RE, priority = true,
+        note = "player API → muxed + adaptive mp4/webm ladder (desktop used yt-dlp for this)",
+    )
+
+    val ADAPTERS = listOf(APARAT, FILIMO, YOUTUBE)
     private val BY_KEY = ADAPTERS.associateBy { it.key }
 
     // ── helpers ───────────────────────────────────────────────────────────
@@ -321,6 +332,12 @@ object Adapters {
                     }
                     card?.let { it["adapter"] = adapter.key }
                     card
+                }
+                "youtube" -> {
+                    val card = Youtube.card(url)
+                    card?.let { it["adapter"] = adapter.key }
+                    // a refusal is only final when nothing else can try the URL
+                    if (card != null && card["kind"].str() == "media_error" && Ytdlp.available()) null else card
                 }
                 "filimo" -> {
                     val card = parseFilimo(fetchJson(FILIMO_ENDPOINT.replace("{id}", match.group("id")), FILIMO_HEADERS), url)

@@ -33,6 +33,10 @@ echo "==> running page-scan fixtures (player config → qualities → download)"
 java -cp "$OUT:$KOTLIN_HOME/lib/kotlin-stdlib.jar" dev.PageTestsKt
 
 echo
+echo "==> running YouTube fixtures (player API → quality ladder → download)"
+java -cp "$OUT:$KOTLIN_HOME/lib/kotlin-stdlib.jar" dev.YoutubeTestsKt
+
+echo
 echo "==> checking the Android skin (parse + scoping + desktop untouched)"
 if [ -d "$HERE/ui/node_modules" ]; then
     node "$HERE/ui/css_check.mjs"
