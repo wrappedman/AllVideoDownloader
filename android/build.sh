@@ -204,13 +204,20 @@ if [ -f "$APKSIGNER" ]; then
         "$SIGNED"
     java -jar "$APKSIGNER" verify --min-sdk-version "$MIN_SDK" "$SIGNED"
 else
-    echo "==> apksigner fallback (APK Signature Scheme v2, no Android build-tools)"
+    echo "==> signing fallback (APK Signature Scheme v2, no Android build-tools)"
     PYTHON="${PYTHON:-python3}"
-    [ "$("$PYTHON" -c 'import cryptography' 2>&1)" = "" ] \
-        || fail "signing needs apksigner.jar, or the Python 'cryptography' module"
-    "$PYTHON" "$HERE/tools/sign_apk.py" "$SIGNED" "$SIGNED.signed" \
-        --key "${SIGNING_KEY:-$HERE/tools/debug-signing-key.DEBUG-ONLY.pem}" \
-        || fail "signing failed"
+    if [ "$("$PYTHON" -c 'import cryptography' 2>&1)" = "" ]; then
+        "$PYTHON" "$HERE/tools/sign_apk.py" "$SIGNED" "$SIGNED.signed" \
+            --key "${SIGNING_KEY:-$HERE/tools/debug-signing-key.DEBUG-ONLY.pem}" \
+            || fail "signing failed"
+    elif command -v openssl >/dev/null 2>&1; then
+        echo "==> openssl fallback (no 'cryptography' module)"
+        "$PYTHON" "$HERE/tools/sign_apk_openssl.py" "$SIGNED" "$SIGNED.signed" \
+            --key "${SIGNING_KEY:-$HERE/tools/debug-signing-key.DEBUG-ONLY.pem}" \
+            || fail "signing failed"
+    else
+        fail "signing needs apksigner.jar, the Python 'cryptography' module, or openssl"
+    fi
     mv "$SIGNED.signed" "$SIGNED"
     "$PYTHON" "$HERE/tools/verify_apk.py" "$SIGNED" || fail "the v2 signature does not verify"
 fi
