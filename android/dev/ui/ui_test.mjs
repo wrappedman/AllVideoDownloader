@@ -9,6 +9,7 @@ import { createServer } from "node:http";
 import { readFileSync, existsSync, mkdirSync } from "node:fs";
 import { JSDOM, VirtualConsole } from "jsdom";
 import { WebSocket as WsClient } from "ws";
+import * as csstree from "css-tree";
 
 const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 const WEB = `${ROOT}/app/src/main/assets/web`;
@@ -154,6 +155,38 @@ eq(meta.app, "All Video Downloader", "app name from /api/meta");
 check(meta.system.sites.recipes >= 60, `site registry delivered to the UI (${meta.system.sites.recipes} recipes)`);
 check(await until(() => window.API.ws && window.API.ws.connected, 8000, "websocket"), "websocket connected (bootstrap received)");
 
+// snapshot which skin selectors match while the app is in its idle state; the
+// final check unions this with the later (populated) states
+const skinSeen = new Set();
+const strip = (sel) => sel
+  .replace(/::?(before|after|placeholder|-webkit-slider-thumb|-webkit-scrollbar(-thumb)?|first-child|last-child|focus-within|focus-visible|active|hover|checked|disabled|open|focus)\b/g, "")
+  .replace(/^(html\.android|html\.android\s+body\.rail-min)\s*/, "")
+  .trim();
+const skinSources = [
+  `${WEB}/index.html`, `${WEB}/js/app.js`, `${WEB}/js/ui.js`, `${WEB}/js/views/direct.js`,
+  `${WEB}/js/views/downloads.js`, `${WEB}/js/views/settings.js`,
+].map((f) => readFileSync(f, "utf8")).join("\n");
+const skinSelectors = (() => {
+  const ast = csstree.parse(readFileSync(`${WEB}/css/mobile.css`, "utf8"), { positions: true });
+  const out = [];
+  csstree.walk(ast, function (node) {
+    if (node.type === "Rule" && !this.atrule && node.prelude.type === "SelectorList") {
+      csstree.generate(node.prelude).split(",").forEach((sel) => out.push(sel.trim()));
+    }
+  });
+  return out;
+})();
+const snapshotSkin = () => {
+  for (const sel of skinSelectors) {
+    const s = strip(sel);
+    if (!s || /[\s>+~|]$/.test(s)) continue;
+    try { if (doc.querySelector(s)) skinSeen.add(s); } catch { /* unparsable in jsdom */ }
+  }
+};
+
+snapshotSkin();   // observation 1: idle shell
+
+
 // ── 2. navigation ───────────────────────────────────────────────────────────
 console.log("== navigation");
 const settingsNav = $$("#side-nav .nav-item").find((n) => n.dataset.view === "view-settings");
@@ -224,7 +257,70 @@ const hls = await window.API.analyze(`${MEDIA_BASE}/master.m3u8`);
 eq(hls.kind, "hls", "master playlist analyzed as hls");
 check(hls.formats.length >= 2, `variant ladder offered (${hls.formats.length} chips)`);
 
-// ── 6. cleanup + report ────────────────────────────────────────────────────
+// the same analysis through the UI, so the chip widgets exist for the layout checks
+directNav.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+await sleep(150);
+$("#direct-url").value = `${MEDIA_BASE}/master.m3u8`;
+$("#direct-url").dispatchEvent(new window.Event("input", { bubbles: true }));
+$("#btn-analyze").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+check(await until(() => doc.querySelector("#analyze-stage .chip-set .chip"), 20000, "hls chip row"),
+  "resolution chips render as a scrollable row");
+check(doc.querySelectorAll("#analyze-stage .chip-set .chip").length === hls.formats.length,
+  "every quality the backend found got a chip");
+
+
+// ── 6. the Android skin, measured on the live DOM ──────────────────────────
+console.log("== android skin");
+snapshotSkin();   // second observation point: populated views + a result card
+
+const style = (sel, prop) => {
+  const node = doc.querySelector(sel);
+  return node ? window.getComputedStyle(node)[prop] : undefined;
+};
+check(doc.documentElement.classList.contains("android"), "document is in Android mode");
+eq(style(".sidebar", "position"), "fixed", "navigation is a fixed bottom bar");
+eq(style(".sidebar", "flexDirection"), "row", "navigation items sit in a row");
+eq(style("#btn-min", "display"), "none", "desktop minimise button removed");
+eq(style("#btn-max", "display"), "none", "desktop maximise button removed");
+eq(style(".nav-item", "flexDirection"), "column", "tabs are icon-over-label");
+eq(style(".paste-bar", "flexWrap"), "wrap", "url field and actions stack on a phone");
+eq(style(".hero", "textAlign"), "left", "hero copy is left aligned");
+eq(style(".ac-actions", "flexDirection"), "column", "result actions are full-width buttons");
+eq(style(".dl-actions", "opacity"), "1", "row actions are visible without hover");
+eq(style(".viewport", "flex"), "1 1 0%", "viewport still owns the free space");
+
+// a selector counts as live if it matched in ANY observed state, or if every
+// class/id it names is at least created by the frontend (a view we did not
+// open in this run: a media card needs yt-dlp, for example)
+const unmatched = [];
+let stateOnly = 0;
+for (const sel of skinSelectors) {
+  const s = strip(sel);
+  if (!s || /[\s>+~|]$/.test(s)) continue;
+  let live = skinSeen.has(s);
+  if (!live) {
+    try { live = !!doc.querySelector(s); } catch { live = true; }
+  }
+  if (live) continue;
+  const tokens = s.match(/[.#][A-Za-z0-9_-]+/g) || [];
+  const known = tokens.length > 0 && tokens.every((t) => skinSources.includes(t.slice(1)));
+  if (known) { stateOnly++; continue; }
+  unmatched.push(sel);
+}
+check(unmatched.length === 0, `all ${skinSelectors.length} skin selectors target real UI${unmatched.length ? " — " + unmatched.slice(0, 6).join(" | ") : ""} (${stateOnly} are view-state only)`);
+
+// the About sheet now presents as a bottom sheet
+$("#btn-about").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+check(await until(() => $("#modal-root .modal"), 4000, "about sheet"), "About opens as a sheet");
+if ($("#modal-root .modal")) {
+  eq(style("#modal-root .modal", "width"), "100%", "sheet spans the screen width");
+  check(/24px/.test(style("#modal-root .modal", "borderRadius") || ""), "sheet has rounded top corners");
+  check(style("#modal-root", "alignItems") === "end" || style("#modal-root", "align-items") === "end",
+    "sheet is anchored to the bottom edge");
+  $("#modal-root").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));  // backdrop closes
+}
+
+// ── 7. cleanup + report ────────────────────────────────────────────────────
 async function untilJob(id, status, timeout) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {

@@ -53,6 +53,37 @@ unpacker, Aparat/Filimo adapters, cookie-source probing and yt-dlp CLI wiring.
 | `webfinder/api/__init__.py` | `api/ApiServer.kt` |
 | `webfinder/desktop/window.py` | `MainActivity.kt`, `DownloadService.kt`, `FileOpener.kt`, `AvdFileProvider.kt`, `SafExport.kt` |
 
+## The mobile UI
+
+The frontend ships with a **CSS-only Android skin** (`mobile/mobile.css`), so the
+desktop screens keep their layout while the phone gets a touch layout. Nothing in
+`web/` changes: `tools/apply_mobile_ui.py` copies the folder and adds exactly four
+lines to `index.html` (`class="android"`, the skin link, `viewport-fit=cover`,
+theme colour). Every rule in the skin is scoped to `html.android`, and the skin
+test fails the build if a single rule escapes that scope.
+
+| desktop | phone |
+|---|---|
+| frameless window bar with minimise / maximise / close | top app bar: brand, connection dot, quit |
+| 216 px icon rail on the left | bottom tab bar (Grab · Downloads · Settings), icon over label |
+| speed widget + About + Exit at the rail foot | one compact floating cluster above the tab bar |
+| hover-revealed row actions | always-visible 44 px action buttons |
+| two-column settings, side-by-side analyse card | single column, chips scroll horizontally |
+| centred dialogs | bottom sheets with a grab handle |
+| 40 px buttons, 30 px icon buttons | 46 px buttons, 44 px icon buttons, 44 px switches |
+| desktop scrollbars, hover transforms | no hover-stick, no scroll glow, `dvh` sizing, safe-area insets |
+
+Android's back gesture is mapped to the existing UI: an open sheet closes (the
+app's own Escape handler), a secondary tab returns to Grab, and only from there
+does it leave the app — implemented in `MainActivity` without touching the
+frontend or the engine.
+
+Rebuild the asset copy after editing `web/`:
+
+```bash
+android/tools/sync_assets.sh      # web/ → assets/web + the Android skin
+```
+
 ## Android-specific adaptations (all intentional, all documented)
 
 1. **FFmpeg / yt-dlp are optional, user-supplied.** Android cannot `pip install`.
@@ -102,7 +133,7 @@ Tool locations can be overridden: `KOTLIN_HOME`, `ANDROID_JAR`, `DX_JAR`,
 ## Tests
 
 `dev/run_tests.sh` compiles `core/` + `api/` — which contain **no `android.*`
-imports** — for a desktop JVM and runs three suites (163 checks):
+imports** — for a desktop JVM and runs four suites (208 checks):
 
 * `dev/JvmTests.kt` — 89 fixture checks ported from `tools/test_video_core.py`
   (HLS/MPD ladders, container sniffing, JSON, settings defaults, URL joining, the
@@ -116,19 +147,30 @@ imports** — for a desktop JVM and runs three suites (163 checks):
   with byte-identical output, native HLS capture (3 segments concatenated in
   order), AES-128 encrypted HLS decryption, DASH refusal message, and the job
   lifecycle (pause/resume/cancel/clear-finished, `to_dict` keys).
-* `dev/ui/ui_test.mjs` — 27 checks that load the **real, unchanged `web/`
+* `dev/ui/css_check.mjs` — 27 checks on the Android skin: it must parse cleanly,
+  every rule must stay scoped to `html.android` (i.e. the desktop UI cannot be
+  affected), the tab bar must be fixed to the bottom with content padded clear of
+  it, touch targets must meet 44 px, dialogs must present as bottom sheets, and
+  no frontend script may branch on being on Android.
+* `dev/ui/ui_test.mjs` — 45 checks that load the **real, unchanged `web/`
   frontend** in jsdom against the real API server: shell/nav rendering,
   settings cards fed by `/api/settings`, a settings change round-tripping
   through `PUT`, websocket bootstrap, analyze of a live URL, click-to-download
   → the job row appearing in the Downloads view with the file landing on disk
-  byte-for-byte, and an HLS ladder. Needs `npm install` once in `dev/ui/`
-  (jsdom + ws); the suite is skipped when those are absent.
+  byte-for-byte, and an HLS ladder — plus the skin measured on the live DOM
+  (computed layout of every landmark, and all 174 skin selectors resolving to
+  real elements). Needs `npm install` once in `dev/ui/` (jsdom, ws, css-tree);
+  the suite is skipped when those are absent.
 
 ## What is *not* verified
 
 There is no emulator, no `adb` and no Android device in this environment, so the
 APK was **not** installed or launched, and `MainActivity` / `DownloadService` /
-`SafExport` / `AvdFileProvider` were not executed on Android. Verification of the artifact itself is
+`SafExport` / `AvdFileProvider` were not executed on Android. For the same reason
+the mobile layout was validated structurally (CSS cascade resolved per element,
+layout invariants asserted, every selector checked against the booted DOM) — it
+has **not** been pixel-rendered: this sandbox has no browser engine (Chromium
+needs libnss/libnspr, which are not installable here). Verification of the artifact itself is
 static: `aapt2 dump badging`, `apksigner verify` (v1+v2+v3), and an androguard
 parse (valid APK, package/activity/service/provider, permissions, `resources.arsc`
 tables). Everything that does not need Android framework classes — i.e. the whole

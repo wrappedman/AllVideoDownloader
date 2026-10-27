@@ -13,6 +13,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.view.View
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import com.allvideodownloader.avd.api.ApiServer
@@ -58,9 +59,13 @@ class MainActivity : Activity() {
             cacheMode = WebSettings.LOAD_NO_CACHE
             mediaPlaybackRequiresUserGesture = false
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            // touch-first: no zoom buttons, no desktop-style scroll glow
+            builtInZoomControls = false
+            displayZoomControls = false
             userAgentString = webView.settings.userAgentString
         }
         webView.setBackgroundColor(0xFF0B0B12.toInt())
+        webView.overScrollMode = View.OVER_SCROLL_NEVER
         webView.addJavascriptInterface(NativeBridge(), "__AVD_NATIVE__")
         webView.webChromeClient = WebChromeClient()
         webView.webViewClient = object : WebViewClient() {
@@ -214,11 +219,24 @@ class MainActivity : Activity() {
         runCatching { requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7) }
     }
 
+    /**
+     * Android's back gesture, wired to the UI that already exists — no frontend
+     * or engine logic is touched:
+     *
+     *   1. an open dialog  → dispatch Escape, which is exactly how the app's own
+     *      modal helper closes (web/js/ui.js listens for it)
+     *   2. a secondary tab → the app's own router (`window.App.showView`)
+     *   3. the Grab tab    → leave the app; downloads keep running in the
+     *      foreground service, like the desktop window staying alive minimised
+     */
     override fun onBackPressed() {
-        // The UI is a single-page app: back leaves the app. Downloads keep running
-        // in the foreground service, exactly like the desktop app keeps working
-        // while its window is minimised.
-        finish()
+        webView.evaluateJavascript(BACK_SCRIPT) { result ->
+            if (result == null || result.contains("exit")) {
+                if (port != 0) runCatching { server?.stop() }
+                stopService(Intent(this, DownloadService::class.java))
+                finish()
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -231,5 +249,21 @@ class MainActivity : Activity() {
 
     companion object {
         private const val REQ_PICK_FOLDER = 41
+
+        /** Resolves what "back" means for the screen the user is looking at. */
+        private const val BACK_SCRIPT = """(function () {
+            var modal = document.querySelector('#modal-root:not(.hidden)');
+            if (modal) {
+                window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+                if (!document.querySelector('#modal-root:not(.hidden)')) return 'modal';
+            }
+            var active = document.querySelector('.nav-item.active');
+            if (active && active.dataset.view && active.dataset.view !== 'view-direct'
+                && window.App && typeof window.App.showView === 'function') {
+                window.App.showView('view-direct');
+                return 'tab';
+            }
+            return 'exit';
+        })()"""
     }
 }

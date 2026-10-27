@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
-# The APK ships the *unchanged* web frontend. This refreshes the copy in
-# app/src/main/assets/web from the repo root after any UI change.
+# The APK ships the *unchanged* desktop frontend plus the Android-only skin.
+#   web/                      → app/src/main/assets/web  (verbatim copy)
+#   android/mobile/mobile.css → that copy's css/        (scoped via html.android)
+#   index.html                → +class="android" +mobile.css link (nothing else)
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
-DEST="$ROOT/android/app/src/main/assets/web"
-rm -rf "$DEST"
-mkdir -p "$DEST"
-cp -R "$ROOT/web/." "$DEST/"
-echo "synced $(find "$DEST" -type f | wc -l) files from web/ → android/app/src/main/assets/web"
+exec python3 "$HERE/apply_mobile_ui.py"
